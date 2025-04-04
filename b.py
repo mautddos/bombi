@@ -25,13 +25,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     chat_id = update.effective_chat.id
     
     # Check if user is in channel
     try:
-        member = context.bot.get_chat_member(CHANNEL_ID, user.id)
+        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
         if member.status in ['left', 'kicked']:
             # User is not in channel
             keyboard = [
@@ -39,111 +39,111 @@ def start(update: Update, context: CallbackContext) -> None:
                 [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"{JOIN_CHANNEL_TEXT}",
                 reply_markup=reply_markup
             )
             return
     except Exception as e:
         logger.error(f"Error checking channel membership: {e}")
-        update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
+        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
         return
     
     # User is in channel or is admin
-    update.message.reply_text(WELCOME_MESSAGE)
+    await update.message.reply_text(WELCOME_MESSAGE)
 
-def check_join_callback(update: Update, context: CallbackContext) -> None:
+async def check_join_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     user = query.from_user
     
     try:
-        member = context.bot.get_chat_member(CHANNEL_ID, user.id)
+        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
         if member.status in ['left', 'kicked']:
-            query.answer("You haven't joined the channel yet! Click the 'Join Channel' button first.", show_alert=True)
+            await query.answer("You haven't joined the channel yet! Click the 'Join Channel' button first.", show_alert=True)
         else:
-            query.answer("Thank you for joining! You can now use the bot.", show_alert=True)
-            query.edit_message_text(WELCOME_MESSAGE)
+            await query.answer("Thank you for joining! You can now use the bot.", show_alert=True)
+            await query.edit_message_text(WELCOME_MESSAGE)
     except Exception as e:
         logger.error(f"Error in check_join_callback: {e}")
-        query.answer("There was an error. Please try again.", show_alert=True)
+        await query.answer("There was an error. Please try again.", show_alert=True)
 
-def host_command(update: Update, context: CallbackContext) -> None:
+async def host_command(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     
     # Check channel membership first
     try:
-        member = context.bot.get_chat_member(CHANNEL_ID, user.id)
+        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
         if member.status in ['left', 'kicked']:
             keyboard = [
                 [InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)],
                 [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"You must join our channel to use this feature.\n{JOIN_CHANNEL_TEXT}",
                 reply_markup=reply_markup
             )
             return
     except Exception as e:
         logger.error(f"Error checking channel membership: {e}")
-        update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
+        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
         return
     
     # If user is in channel
-    update.message.reply_text("Please send me your Python (.py) file to host.\n\nNote: Files should be less than 20MB.")
+    await update.message.reply_text("Please send me your Python (.py) file to host.\n\nNote: Files should be less than 20MB.")
 
-def handle_document(update: Update, context: CallbackContext) -> None:
+async def handle_document(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     document = update.message.document
     
     # Check if it's a Python file
     if not document.file_name.lower().endswith('.py'):
-        update.message.reply_text("❌ Please send only Python files (.py extension).")
+        await update.message.reply_text("❌ Please send only Python files (.py extension).")
         return
     
     # Check file size (max 20MB)
     if document.file_size > 20 * 1024 * 1024:  # 20MB limit
-        update.message.reply_text("❌ File too large. Maximum size is 20MB.")
+        await update.message.reply_text("❌ File too large. Maximum size is 20MB.")
         return
     
     # Check channel membership
     try:
-        member = context.bot.get_chat_member(CHANNEL_ID, user.id)
+        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
         if member.status in ['left', 'kicked']:
             keyboard = [
                 [InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)],
                 [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"You must join our channel to use this feature.\n{JOIN_CHANNEL_TEXT}",
                 reply_markup=reply_markup
             )
             return
     except Exception as e:
         logger.error(f"Error checking channel membership: {e}")
-        update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
+        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
         return
     
     # Download the file
-    file = context.bot.get_file(document.file_id)
+    file = await context.bot.get_file(document.file_id)
     download_path = f"user_files/{user.id}_{document.file_name}"
     
     # Create user_files directory if it doesn't exist
     os.makedirs("user_files", exist_ok=True)
     
     try:
-        file.download(download_path)
+        await file.download_to_drive(download_path)
         
         # Respond to user
-        update.message.reply_text(
+        await update.message.reply_text(
             f"✅ File {document.file_name} received and hosted successfully!\n\n"
             f"File size: {round(document.file_size/1024, 2)} KB\n"
             f"Saved as: {download_path}"
         )
         
         # Notify admin
-        context.bot.send_message(
+        await context.bot.send_message(
             ADMIN_ID,
             f"📁 New file hosted by @{user.username or user.first_name} (ID: {user.id})\n"
             f"📝 File: {document.file_name}\n"
@@ -151,17 +151,21 @@ def handle_document(update: Update, context: CallbackContext) -> None:
         )
     except Exception as e:
         logger.error(f"Error handling file: {e}")
-        update.message.reply_text("❌ There was an error processing your file. Please try again.")
+        await update.message.reply_text("❌ There was an error processing your file. Please try again.")
 
-def error_handler(update: Update, context: CallbackContext) -> None:
+async def error_handler(update: Update, context: CallbackContext) -> None:
+    """Log the error and send a telegram message to notify the developer."""
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
     
     # Notify admin
-    context.bot.send_message(
-        ADMIN_ID,
-        f"⚠️ Error occurred:\n{context.error}\n\n"
-        f"Update: {update.to_dict() if update else 'None'}"
-    )
+    try:
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"⚠️ Error occurred:\n{context.error}\n\n"
+            f"Update: {update.to_dict() if update else 'None'}"
+        )
+    except Exception as e:
+        logger.error(f"Error sending error notification: {e}")
 
 def main() -> None:
     # Create the Application and pass it your bot's token.
