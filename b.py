@@ -5,9 +5,9 @@ from telegram.ext import (
     Updater,
     CommandHandler,
     MessageHandler,
-    Filters,
     CallbackContext,
-    CallbackQueryHandler
+    CallbackQueryHandler,
+    filters
 )
 
 # Bot configuration with YOUR details
@@ -164,31 +164,25 @@ def error_handler(update: Update, context: CallbackContext) -> None:
     )
 
 def main() -> None:
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN)
-
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+    # Create the Application and pass it your bot's token.
+    application = Application.builder().token(TOKEN).build()
 
     # Register commands
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("host", host_command))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("host", host_command))
     
     # Register callback for join check button
-    dispatcher.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join$'))
+    application.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join$'))
     
     # Register document handler
-    dispatcher.add_handler(MessageHandler(Filters.document, handle_document))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     
     # Register error handler
-    dispatcher.add_error_handler(error_handler)
+    application.add_error_handler(error_handler)
 
     # Start the Bot
     print("Bot is running...")
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
