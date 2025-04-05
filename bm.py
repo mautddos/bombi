@@ -12,34 +12,49 @@ from telegram.ext import (
 
 class XHamsterDownloaderBot:
     def __init__(self):
-        self.api_base = "https://vkrdownloader.xyz/server/"
-        self.api_key = "vkrdownloader"
+        self.api_endpoints = [
+            "https://vkrdownloader.xyz/server/",
+            "https://xhamsterdownloader.com/api/",
+            "https://onlinevideoconverter.pro/api/"
+        ]
+        self.api_key = "free_api_key"  # Some services might require this
     
-    def process_link(self, xhamster_url: str) -> dict:
-        """Process the XHamster URL through the vkrdownloader API"""
-        try:
-            encoded_url = quote(xhamster_url, safe='')
-            api_url = f"{self.api_base}?api_key={self.api_key}&vkr={encoded_url}"
-            response = requests.get(api_url)
-            
-            if response.status_code == 200:
-                return self._parse_response(response.text)
-            return {}
-        except Exception as e:
-            print(f"Error processing link: {e}")
-            return {}
+    def try_all_apis(self, xhamster_url: str) -> dict:
+        """Try multiple APIs to get download links"""
+        for endpoint in self.api_endpoints:
+            try:
+                encoded_url = quote(xhamster_url, safe='')
+                api_url = f"{endpoint}?api_key={self.api_key}&url={encoded_url}"
+                response = requests.get(api_url, timeout=10)
+                
+                if response.status_code == 200:
+                    result = self._parse_response(response.text)
+                    if result:
+                        return result
+            except:
+                continue
+        return {}
     
     def _parse_response(self, html_content: str) -> dict:
         """Parse the HTML response to extract download links"""
-        pattern = r'<a href="(https?://[^"]+)"[^>]*>(\d{3,4}p)</a>'
-        matches = re.findall(pattern, html_content)
-        return {quality: link for link, quality in matches}
+        # Try multiple patterns to extract links
+        patterns = [
+            r'<a href="(https?://[^"]+)"[^>]*>(\d{3,4}p)</a>',
+            r'download_url":"([^"]+)","quality":"(\d{3,4}p)',
+            r'"(https?://[^"]+\.mp4)"[^>]+>(\d{3,4}p)'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, html_content)
+            if matches:
+                return {quality: link for link, quality in matches}
+        return {}
     
     def get_download_options(self, xhamster_url: str) -> str:
         """Get download options for the given XHamster URL"""
-        download_links = self.process_link(xhamster_url)
+        download_links = self.try_all_apis(xhamster_url)
         if not download_links:
-            return "❌ Sorry, I couldn't process that XHamster link."
+            return "❌ Sorry, I couldn't find any working download options for this video.\n\nTry these alternatives:\n1. Use a VPN\n2. Try again later\n3. Try a different video"
         
         message = "📹 Available download qualities:\n"
         for quality in sorted(download_links.keys(), key=lambda x: int(x[:-1]), reverse=True):
@@ -49,14 +64,14 @@ class XHamsterDownloaderBot:
     
     def get_download_link(self, xhamster_url: str, quality: str) -> str:
         """Get the download link for a specific quality"""
-        download_links = self.process_link(xhamster_url)
+        download_links = self.try_all_apis(xhamster_url)
         if not download_links:
-            return "❌ Sorry, I couldn't process that XHamster link."
+            return "❌ Download options no longer available. Please send the link again."
         
         quality = quality.lower().replace('p', '') + 'p'
         for available_quality, link in download_links.items():
             if available_quality.lower() == quality.lower():
-                return f"✅ Here's your {quality} download link:\n{link}"
+                return f"✅ Here's your {quality} download link:\n{link}\n\n⚠️ Link expires in 15 minutes"
         
         available = ", ".join(sorted(download_links.keys(), key=lambda x: int(x[:-1]), reverse=True))
         return f"❌ Quality {quality} not available. Options are: {available}"
@@ -66,7 +81,9 @@ async def start(update: Update, context: CallbackContext):
     """Send a welcome message when the command /start is issued"""
     await update.message.reply_text(
         "🤖 Welcome to XHamster Video Downloader Bot!\n\n"
-        "🔹 Just send me an XHamster video link and I'll provide download options."
+        "🔹 Just send me an XHamster video link and I'll provide download options.\n"
+        "🔹 Currently supported formats: 480p, 720p, 1080p\n\n"
+        "⚠️ Note: Some videos might not be available due to regional restrictions"
     )
 
 async def handle_xhamster_link(update: Update, context: CallbackContext):
@@ -77,6 +94,8 @@ async def handle_xhamster_link(update: Update, context: CallbackContext):
         response = bot.get_download_options(url)
         await update.message.reply_text(response)
         context.user_data['last_xhamster_url'] = url
+    else:
+        await update.message.reply_text("❌ Please send a valid XHamster video URL")
 
 async def handle_quality_choice(update: Update, context: CallbackContext):
     """Handle quality selection"""
@@ -89,18 +108,17 @@ async def handle_quality_choice(update: Update, context: CallbackContext):
             await update.message.reply_text(response)
         else:
             await update.message.reply_text("⚠️ Please send an XHamster link first.")
+    else:
+        await update.message.reply_text("❌ Please enter a valid quality (e.g., 480, 720, 1080)")
 
 def main():
     """Start the bot"""
-    # Create the Application and pass it your bot's token
     application = Application.builder().token("7910030892:AAF87kCl5kBESWxPfaMSUJS0himIaBj2nCI").build()
     
-    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_xhamster_link))
     application.add_handler(MessageHandler(filters.Regex(r'^\d{3,4}$'), handle_quality_choice))
     
-    # Run the bot until you press Ctrl-C
     print("Bot is running...")
     application.run_polling()
 
