@@ -1,684 +1,100 @@
 import logging
-from telegram import (
-    Update, 
-    InlineKeyboardButton, 
-    InlineKeyboardMarkup,
-    ChatPermissions,
-    ChatMemberAdministrator
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-    CallbackQueryHandler,
-    ConversationHandler
-)
-import random
-import requests
-from datetime import datetime, timedelta
+from telegram import Update, Sticker, StickerSet
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
 # Enable logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Bot token
-TOKEN = "8100391327:AAHTBZ6WGBNpVtnj7uiZRAbGuEF7xbK9THs"
+# Your bot token from BotFather
+TOKEN = "7910030892:AAF87kCl5kBESWxPfaMSUJS0himIaBj2nCI"
 
-# Conversation states
-MAIN_MENU, WELCOME_SETTINGS, ADMIN_TOOLS, FUN_COMMANDS = range(4)
+# Sticker pack name (the part after addstickers/)
+STICKER_PACK = "NilaaXXX"
 
-# User warnings storage
-user_warnings = {}
+# Dictionary to store sticker sets and current positions for each chat
+sticker_data = {}
 
-# Jokes, quotes, facts databases
-JOKES = [
-    "Why don't scientists trust atoms? Because they make up everything!",
-    "Did you hear about the mathematician who's afraid of negative numbers? He'll stop at nothing to avoid them.",
-    "Why don't skeletons fight each other? They don't have the guts.",
-]
-
-QUOTES = [
-    "The only way to do great work is to love what you do. - Steve Jobs",
-    "Innovation distinguishes between a leader and a follower. - Steve Jobs",
-    "Your time is limited, don't waste it living someone else's life. - Steve Jobs",
-]
-
-FACTS = [
-    "Honey never spoils. Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly good to eat.",
-    "Octopuses have three hearts, nine brains, and blue blood.",
-    "The shortest war in history was between Britain and Zanzibar on August 27, 1896. Zanzibar surrendered after 38 minutes.",
-]
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send a welcome message when the command /start is issued."""
-    user = update.effective_user
-    keyboard = [
-        [
-            InlineKeyboardButton("⚙️ Welcome Settings", callback_data=str(WELCOME_SETTINGS)),
-            InlineKeyboardButton("🛡️ Admin Tools", callback_data=str(ADMIN_TOOLS)),
-        ],
-        [InlineKeyboardButton("🎉 Fun Commands", callback_data=str(FUN_COMMANDS))],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+async def start(update: Update, context: CallbackContext) -> None:
+    """Send a message with a button that sends stickers when pressed."""
+    chat_id = update.effective_chat.id
     
-    await update.message.reply_html(
-        rf"👋 Hi {user.mention_html()}! I'm your advanced group management bot.\n\n"
-        "I can help you manage your group with powerful tools and entertain your members!",
-        reply_markup=reply_markup,
+    # Initialize sticker data for this chat if not exists
+    if chat_id not in sticker_data:
+        sticker_data[chat_id] = {
+            'stickers': [],
+            'current_index': 0,
+            'sticker_set_loaded': False
+        }
+    
+    # Create a button that will trigger the sticker sending
+    await update.message.reply_text(
+        "Click the button below to start receiving stickers!",
+        reply_markup={
+            "inline_keyboard": [[
+                {"text": "Send Sticker", "callback_data": "send_sticker"}
+            ]]
+        }
     )
-    return MAIN_MENU
 
-async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Return to main menu."""
+async def button_callback(update: Update, context: CallbackContext) -> None:
+    """Handle button callbacks."""
     query = update.callback_query
-    await query.answer()
+    chat_id = query.message.chat_id
     
-    keyboard = [
-        [
-            InlineKeyboardButton("⚙️ Welcome Settings", callback_data=str(WELCOME_SETTINGS)),
-            InlineKeyboardButton("🛡️ Admin Tools", callback_data=str(ADMIN_TOOLS)),
-        ],
-        [InlineKeyboardButton("🎉 Fun Commands", callback_data=str(FUN_COMMANDS))],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Initialize if not exists
+    if chat_id not in sticker_data:
+        sticker_data[chat_id] = {
+            'stickers': [],
+            'current_index': 0,
+            'sticker_set_loaded': False
+        }
     
-    await query.edit_message_text(
-        text="🏠 Main Menu\n\nWhat would you like to do?",
-        reply_markup=reply_markup,
-    )
-    return MAIN_MENU
-
-async def welcome_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show welcome settings options."""
-    query = update.callback_query
-    await query.answer()
+    data = sticker_data[chat_id]
     
-    keyboard = [
-        [
-            InlineKeyboardButton("📝 Set Welcome Message", callback_data="set_welcome"),
-            InlineKeyboardButton("👋 Set Goodbye Message", callback_data="set_goodbye"),
-        ],
-        [
-            InlineKeyboardButton("🖼️ Set Welcome Image", callback_data="set_welcome_image"),
-            InlineKeyboardButton("📊 Welcome Stats", callback_data="welcome_stats"),
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="back")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text="⚙️ Welcome Message Settings\n\nConfigure how I welcome new members to your group.",
-        reply_markup=reply_markup,
-    )
-    return WELCOME_SETTINGS
-
-async def admin_tools_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show admin tools."""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("🔨 Ban User", callback_data="ban_menu"),
-            InlineKeyboardButton("🔇 Mute User", callback_data="mute_menu"),
-        ],
-        [
-            InlineKeyboardButton("⚠️ Warn User", callback_data="warn_menu"),
-            InlineKeyboardButton("👢 Kick User", callback_data="kick_menu"),
-        ],
-        [
-            InlineKeyboardButton("🧹 Purge Messages", callback_data="purge_menu"),
-            InlineKeyboardButton("📌 Pin Message", callback_data="pin_menu"),
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="back")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text="🛡️ Admin Tools\n\nManage your group with these powerful moderation tools.",
-        reply_markup=reply_markup,
-    )
-    return ADMIN_TOOLS
-
-async def fun_commands_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show fun commands."""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("😂 Random Joke", callback_data="random_joke"),
-            InlineKeyboardButton("💬 Random Quote", callback_data="random_quote"),
-        ],
-        [
-            InlineKeyboardButton("📚 Random Fact", callback_data="random_fact"),
-            InlineKeyboardButton("🎲 Random Number", callback_data="random_number"),
-        ],
-        [
-            InlineKeyboardButton("🐶 Random Dog", callback_data="random_dog"),
-            InlineKeyboardButton("🐱 Random Cat", callback_data="random_cat"),
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="back")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text="🎉 Fun Commands\n\nLet's have some fun with these commands!",
-        reply_markup=reply_markup,
-    )
-    return FUN_COMMANDS
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a help message."""
-    help_text = """
-    🤖 *Bot Commands Help*:
-
-    *Admin Commands:*
-    /ban [user_id] - Ban a user
-    /unban [user_id] - Unban a user
-    /mute [user_id] [time] - Mute a user (e.g., /mute 123456 1h)
-    /unmute [user_id] - Unmute a user
-    /warn [user_id] - Warn a user (3 warnings = ban)
-    /kick [user_id] - Kick a user
-    /purge [number] - Delete multiple messages
-    /pin - Pin a message (reply to message)
-    /unpin - Unpin a message
-    /promote [user_id] - Promote a user to admin
-    /demote [user_id] - Demote an admin
-    
-    *Fun Commands:*
-    /joke - Get a random joke
-    /quote - Get an inspirational quote
-    /fact - Get an interesting fact
-    /dog - Get a random dog picture
-    /cat - Get a random cat picture
-    
-    *Utility Commands:*
-    /id - Get user/group ID
-    /info - Get user info
-    /time - Get current time
-    """
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-
-# ADMIN COMMANDS IMPLEMENTATION
-
-async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ban a user from the group."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /ban [user_id] or reply to user's message with /ban")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.ban_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id
-        )
-        await update.message.reply_text(f"✅ User {user_id} has been banned.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Unban a user from the group."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /unban [user_id]")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.unban_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id
-        )
-        await update.message.reply_text(f"✅ User {user_id} has been unbanned.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Mute a user in the group."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /mute [user_id] [time] (e.g., /mute 123456 1h)")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        until_date = datetime.now() + timedelta(hours=1)  # Default 1 hour mute
-        
-        if len(context.args) > 1:
-            time_arg = context.args[1].lower()
-            if 'h' in time_arg:
-                hours = int(time_arg.replace('h', ''))
-                until_date = datetime.now() + timedelta(hours=hours)
-            elif 'm' in time_arg:
-                minutes = int(time_arg.replace('m', ''))
-                until_date = datetime.now() + timedelta(minutes=minutes)
-            elif 'd' in time_arg:
-                days = int(time_arg.replace('d', ''))
-                until_date = datetime.now() + timedelta(days=days)
-
-        await context.bot.restrict_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=False,
-                can_send_media_messages=False,
-                can_send_polls=False,
-                can_send_other_messages=False,
-                can_add_web_page_previews=False,
-                can_change_info=False,
-                can_invite_users=False,
-                can_pin_messages=False
-            ),
-            until_date=until_date
-        )
-        await update.message.reply_text(f"✅ User {user_id} has been muted until {until_date}.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Unmute a user in the group."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /unmute [user_id]")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.restrict_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=True,
-                can_send_media_messages=True,
-                can_send_polls=True,
-                can_send_other_messages=True,
-                can_add_web_page_previews=True,
-                can_change_info=False,
-                can_invite_users=False,
-                can_pin_messages=False
-            )
-        )
-        await update.message.reply_text(f"✅ User {user_id} has been unmuted.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Warn a user and take action if warnings exceed limit."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /warn [user_id] or reply to user's message with /warn")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        chat_id = update.effective_chat.id
-        
-        if chat_id not in user_warnings:
-            user_warnings[chat_id] = {}
-        
-        if user_id in user_warnings[chat_id]:
-            user_warnings[chat_id][user_id] += 1
-        else:
-            user_warnings[chat_id][user_id] = 1
-        
-        warning_count = user_warnings[chat_id][user_id]
-        
-        if warning_count >= 3:
-            await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
-            del user_warnings[chat_id][user_id]
-            await update.message.reply_text(
-                f"⛔ User {user_id} has reached 3 warnings and has been banned."
-            )
-        else:
-            await update.message.reply_text(
-                f"⚠️ User {user_id} has been warned. ({warning_count}/3 warnings)"
-            )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def kick_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Kick a user from the group."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /kick [user_id] or reply to user's message with /kick")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.ban_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id
-        )
-        await context.bot.unban_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id
-        )
-        await update.message.reply_text(f"👢 User {user_id} has been kicked.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def purge_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Delete multiple messages at once."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /purge [number] (e.g., /purge 10)")
-        return
-
-    try:
-        count = int(context.args[0]) + 1  # +1 to include the command message
-        if count > 100:
-            await update.message.reply_text("❌ You can only delete up to 100 messages at once.")
+    # Load sticker set if not already loaded
+    if not data['sticker_set_loaded']:
+        try:
+            sticker_set = await context.bot.get_sticker_set(STICKER_PACK)
+            data['stickers'] = sticker_set.stickers
+            data['sticker_set_loaded'] = True
+            data['current_index'] = 0
+            await query.answer("Sticker pack loaded!")
+        except Exception as e:
+            await query.answer(f"Error loading sticker pack: {e}")
             return
-
-        message_id = update.message.message_id
-        chat_id = update.effective_chat.id
+    
+    # Send the current sticker
+    if data['stickers']:
+        current_sticker = data['stickers'][data['current_index']]
+        await context.bot.send_sticker(chat_id=chat_id, sticker=current_sticker.file_id)
         
-        for i in range(message_id, message_id - count, -1):
-            try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=i)
-            except Exception:
-                continue
+        # Update index for next sticker (wrap around if at end)
+        data['current_index'] = (data['current_index'] + 1) % len(data['stickers'])
         
-        msg = await update.message.reply_text(f"🧹 Purged {count-1} messages.")
-        await context.bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def pin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Pin a message in the chat."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text("ℹ️ Please reply to a message to pin it.")
-        return
-
-    try:
-        message_id = update.message.reply_to_message.message_id
-        await context.bot.pin_chat_message(
-            chat_id=update.effective_chat.id,
-            message_id=message_id,
-            disable_notification=True
-        )
-        await update.message.reply_text("📌 Message pinned successfully!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def unpin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Unpin a message in the chat."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    try:
-        await context.bot.unpin_chat_message(
-            chat_id=update.effective_chat.id
-        )
-        await update.message.reply_text("📌 Message unpinned successfully!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Promote a user to admin."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /promote [user_id]")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.promote_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id,
-            can_manage_chat=True,
-            can_delete_messages=True,
-            can_manage_video_chats=True,
-            can_restrict_members=True,
-            can_promote_members=False,
-            can_change_info=True,
-            can_invite_users=True,
-            can_pin_messages=True
-        )
-        await update.message.reply_text(f"👑 User {user_id} has been promoted to admin!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def demote_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Demote an admin."""
-    if not await is_user_admin(update, context):
-        await update.message.reply_text("❌ You need to be an admin to use this command.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /demote [user_id]")
-        return
-
-    try:
-        user_id = int(context.args[0])
-        await context.bot.promote_chat_member(
-            chat_id=update.effective_chat.id,
-            user_id=user_id,
-            is_anonymous=False,
-            can_manage_chat=False,
-            can_delete_messages=False,
-            can_manage_video_chats=False,
-            can_restrict_members=False,
-            can_promote_members=False,
-            can_change_info=False,
-            can_invite_users=False,
-            can_pin_messages=False
-        )
-        await update.message.reply_text(f"👤 User {user_id} has been demoted!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-# FUN COMMANDS IMPLEMENTATION
-
-async def random_joke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a random joke."""
-    joke = random.choice(JOKES)
-    await update.message.reply_text(joke)
-
-async def random_quote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a random quote."""
-    quote = random.choice(QUOTES)
-    await update.message.reply_text(quote)
-
-async def random_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a random fact."""
-    fact = random.choice(FACTS)
-    await update.message.reply_text(f"📚 Did you know?\n\n{fact}")
-
-async def random_dog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a random dog picture."""
-    try:
-        response = requests.get("https://dog.ceo/api/breeds/image/random")
-        if response.status_code == 200:
-            image_url = response.json()["message"]
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=image_url,
-                caption="🐶 Here's a random dog for you!"
-            )
-    except Exception as e:
-        await update.message.reply_text("❌ Couldn't fetch a dog picture. Try again later.")
-
-async def random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a random cat picture."""
-    try:
-        response = requests.get("https://api.thecatapi.com/v1/images/search")
-        if response.status_code == 200:
-            image_url = response.json()[0]["url"]
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=image_url,
-                caption="🐱 Here's a random cat for you!"
-            )
-    except Exception as e:
-        await update.message.reply_text("❌ Couldn't fetch a cat picture. Try again later.")
-
-# UTILITY COMMANDS
-
-async def get_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Get the user's ID or chat ID."""
-    if update.message.reply_to_message:
-        user = update.message.reply_to_message.from_user
-        await update.message.reply_text(f"👤 User ID: {user.id}")
+        await query.answer()
     else:
-        await update.message.reply_text(
-            f"👤 Your ID: {update.effective_user.id}\n"
-            f"💬 Chat ID: {update.effective_chat.id}"
-        )
-
-async def get_user_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Get information about a user."""
-    if update.message.reply_to_message:
-        user = update.message.reply_to_message.from_user
-    else:
-        user = update.effective_user
-
-    info_text = f"""
-    👤 *User Information*:
-    
-    *Name:* {user.full_name}
-    *Username:* @{user.username if user.username else 'N/A'}
-    *ID:* `{user.id}`
-    *Profile Link:* [Link](tg://user?id={user.id})
-    """
-    await update.message.reply_text(info_text, parse_mode=ParseMode.MARKDOWN)
-
-async def get_current_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Get the current time."""
-    now = datetime.now()
-    await update.message.reply_text(f"⏰ Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-
-# HELPER FUNCTIONS
-
-async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if the user is an admin in the chat."""
-    user = update.effective_user
-    chat = update.effective_chat
-    
-    if user.id == 1087968824:  # GroupAnonymousBot
-        return True
-    
-    try:
-        member = await context.bot.get_chat_member(chat.id, user.id)
-        return member.status in ["administrator", "creator"]
-    except Exception as e:
-        logger.error(f"Error checking admin status: {e}")
-        return False
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors and send a message to the user."""
-    logger.error(msg="Exception while handling an update:", exc_info=context.error)
-    
-    if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text(
-            "❌ An error occurred while processing your request. Please try again later."
-        )
+        await query.answer("No stickers available in the pack.")
 
 def main() -> None:
     """Start the bot."""
-    application = Application.builder().token(TOKEN).build()
+    # Create the Updater and pass it your bot's token.
+    updater = Updater(TOKEN)
 
-    # Add conversation handler with the states
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            MAIN_MENU: [
-                CallbackQueryHandler(welcome_settings_menu, pattern='^' + str(WELCOME_SETTINGS) + '$'),
-                CallbackQueryHandler(admin_tools_menu, pattern='^' + str(ADMIN_TOOLS) + '$'),
-                CallbackQueryHandler(fun_commands_menu, pattern='^' + str(FUN_COMMANDS) + '$'),
-                CallbackQueryHandler(main_menu, pattern='^back$'),
-            ],
-            WELCOME_SETTINGS: [
-                CallbackQueryHandler(main_menu, pattern='^back$'),
-            ],
-            ADMIN_TOOLS: [
-                CallbackQueryHandler(main_menu, pattern='^back$'),
-            ],
-            FUN_COMMANDS: [
-                CallbackQueryHandler(main_menu, pattern='^back$'),
-                CallbackQueryHandler(random_joke, pattern='^random_joke$'),
-                CallbackQueryHandler(random_quote, pattern='^random_quote$'),
-                CallbackQueryHandler(random_fact, pattern='^random_fact$'),
-                CallbackQueryHandler(random_dog, pattern='^random_dog$'),
-                CallbackQueryHandler(random_cat, pattern='^random_cat$'),
-            ],
-        },
-        fallbacks=[CommandHandler('start', start)],
-    )
+    # Get the dispatcher to register handlers
+    dispatcher = updater.dispatcher
 
-    application.add_handler(conv_handler)
-    
-    # Command handlers
-    application.add_handler(CommandHandler("help", help_command))
-    
-    # Admin commands
-    application.add_handler(CommandHandler("ban", ban_user))
-    application.add_handler(CommandHandler("unban", unban_user))
-    application.add_handler(CommandHandler("mute", mute_user))
-    application.add_handler(CommandHandler("unmute", unmute_user))
-    application.add_handler(CommandHandler("warn", warn_user))
-    application.add_handler(CommandHandler("kick", kick_user))
-    application.add_handler(CommandHandler("purge", purge_messages))
-    application.add_handler(CommandHandler("pin", pin_message))
-    application.add_handler(CommandHandler("unpin", unpin_message))
-    application.add_handler(CommandHandler("promote", promote_user))
-    application.add_handler(CommandHandler("demote", demote_user))
-    
-    # Fun commands
-    application.add_handler(CommandHandler("joke", random_joke))
-    application.add_handler(CommandHandler("quote", random_quote))
-    application.add_handler(CommandHandler("fact", random_fact))
-    application.add_handler(CommandHandler("dog", random_dog))
-    application.add_handler(CommandHandler("cat", random_cat))
-    
-    # Utility commands
-    application.add_handler(CommandHandler("id", get_user_id))
-    application.add_handler(CommandHandler("info", get_user_info))
-    application.add_handler(CommandHandler("time", get_current_time))
-    
-    # Error handler
-    application.add_error_handler(error_handler)
+    # Register command and callback handlers
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CallbackQueryHandler(button_callback, pattern="^send_sticker$"))
 
-    # Run the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start the Bot
+    updater.start_polling()
+
+    # Run the bot until you press Ctrl-C
+    updater.idle()
 
 if __name__ == '__main__':
     main()
