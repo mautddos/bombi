@@ -1,6 +1,6 @@
 import logging
-from telegram import Update, Sticker, StickerSet
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram import Update, StickerSet
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Enable logging
 logging.basicConfig(
@@ -17,7 +17,7 @@ STICKER_PACK = "NilaaXXX"
 # Dictionary to store sticker sets and current positions for each chat
 sticker_data = {}
 
-async def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message with a button that sends stickers when pressed."""
     chat_id = update.effective_chat.id
     
@@ -39,9 +39,10 @@ async def start(update: Update, context: CallbackContext) -> None:
         }
     )
 
-async def button_callback(update: Update, context: CallbackContext) -> None:
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button callbacks."""
     query = update.callback_query
+    await query.answer()
     chat_id = query.message.chat_id
     
     # Initialize if not exists
@@ -61,9 +62,8 @@ async def button_callback(update: Update, context: CallbackContext) -> None:
             data['stickers'] = sticker_set.stickers
             data['sticker_set_loaded'] = True
             data['current_index'] = 0
-            await query.answer("Sticker pack loaded!")
         except Exception as e:
-            await query.answer(f"Error loading sticker pack: {e}")
+            await query.message.reply_text(f"Error loading sticker pack: {e}")
             return
     
     # Send the current sticker
@@ -73,28 +73,20 @@ async def button_callback(update: Update, context: CallbackContext) -> None:
         
         # Update index for next sticker (wrap around if at end)
         data['current_index'] = (data['current_index'] + 1) % len(data['stickers'])
-        
-        await query.answer()
     else:
-        await query.answer("No stickers available in the pack.")
+        await query.message.reply_text("No stickers available in the pack.")
 
 def main() -> None:
     """Start the bot."""
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN)
-
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+    # Create the Application
+    application = Application.builder().token(TOKEN).build()
 
     # Register command and callback handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CallbackQueryHandler(button_callback, pattern="^send_sticker$"))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^send_sticker$"))
 
     # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
