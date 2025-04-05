@@ -1,22 +1,20 @@
 import requests
-from telegram import Bot
 import os
 
 # Your credentials
 BOT_TOKEN = "7910030892:AAF87kCl5kBESWxPfaMSUJS0himIaBj2nCI"
-CHAT_ID = "8167507955"  # Your chat ID
-
-# CDN URL
+CHAT_ID = "8167507955"
 VIDEO_URL = "https://ip296321550.ahcdn.com/key=ZVah3Txj1tCBKt+HLrXfrQ,s=,end=1743840000/data=18.180.253.18-dvp/state=Z-CxJAFJAHQjlBaoH-Ma/reftag=0201380214/media=hls4/ssd6/21/1/132727041.mp4/index.m3u8"
 
 def send_video():
-    bot = Bot(token=BOT_TOKEN)
-    
     try:
-        # Try sending as URL first
-        bot.send_message(chat_id=CHAT_ID, text=f"Video URL: {VIDEO_URL}")
+        # 1. First try sending just the URL
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": f"Video URL: {VIDEO_URL}"}
+        )
         
-        # Download and upload
+        # 2. Download the video
         print("Downloading video...")
         response = requests.get(VIDEO_URL, stream=True)
         
@@ -26,20 +24,20 @@ def send_video():
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
             
+            # 3. Send the video file
             print("Uploading to Telegram...")
             with open(temp_file, 'rb') as video_file:
-                bot.send_video(
-                    chat_id=CHAT_ID,
-                    video=video_file,
-                    caption="Sent via Pydroid 3"
+                requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                    data={"chat_id": CHAT_ID, "caption": "Sent from VPS"},
+                    files={"video": video_file}
                 )
             
             os.remove(temp_file)
             print("Video sent successfully!")
         else:
-            bot.send_message(chat_id=CHAT_ID, text=f"Download failed. Status: {response.status_code}")
+            print(f"Download failed. Status: {response.status_code}")
     except Exception as e:
-        bot.send_message(chat_id=CHAT_ID, text=f"Error: {str(e)}")
         print(f"Error: {str(e)}")
 
 # Run the function
