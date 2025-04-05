@@ -5,7 +5,7 @@ from datetime import datetime
 # Configuration
 BOT_TOKEN = "7910030892:AAF87kCl5kBESWxPfaMSUJS0himIaBj2nCI"
 CHAT_ID = "8167507955"
-MP4_URL = "YOUR_MP4_URL_HERE"
+MP4_URL = "https://ip296322752.ahcdn.com/key=wSrpeebvepWT31ajWVtqGg,s=,end=1743836400,limit=3/data=43.153.85.245-dvp/state=Z-CmJAFJAHQjlBaoH-Ma/reftag=0201380214/ssd6/21/9/286482739/022/300/131/720p.h264.mp4"
 MAX_SIZE = 45 * 1024 * 1024  # 45MB (under Telegram's 50MB limit)
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
