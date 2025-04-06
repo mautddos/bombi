@@ -10,7 +10,7 @@ import names
 import termcolor
 
 # Open Telegram channel
-webbrowser.open('https://t.me/ModcaTheLost')
+
 
 proxies = None
 
