@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 
 # Configuration
-TOKEN = "7589335242:AAHHwteKQ7Keo4PRQVUv7nFlLV1tj1c3cYw"  # Replace with your actual token
+TOKEN = "8180063318:AAG2FtpVESnPYKuEszDIaewy-LXgVXXDS-o"  # Replace with your actual token
 MAX_PROXIES_TO_RETURN = 500
 PROXY_CHECK_TIMEOUT = 10
 TEST_URL = "http://www.google.com"
