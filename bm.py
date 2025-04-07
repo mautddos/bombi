@@ -4,9 +4,8 @@ import random
 import time
 import asyncio
 import aiohttp
-import requests
 from datetime import datetime
-from typing import List, Set, Optional
+from typing import List, Set
 from telegram import Update, InputFile, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,7 +17,7 @@ from telegram.ext import (
 )
 
 # Configuration
-TOKEN = "7589335242:AAHHwteKQ7Keo4PRQVUv7nFlLV1tj1c3cYw"
+TOKEN = "7589335242:AAHHwteKQ7Keo4PRQVUv7nFlLV1tj1c3cYw"  # Replace with your actual token
 MAX_PROXIES_TO_RETURN = 500
 PROXY_CHECK_TIMEOUT = 10
 TEST_URL = "http://www.google.com"
@@ -49,12 +48,18 @@ PROXY_SOURCES = [
 
 class ProxyBot:
     def __init__(self):
-        self.session = aiohttp.ClientSession()
+        self.session = None
         self.last_proxy_fetch = None
         self.cached_proxies = set()
     
+    async def initialize(self):
+        """Initialize the aiohttp session"""
+        self.session = aiohttp.ClientSession()
+    
     async def close(self):
-        await self.session.close()
+        """Close the aiohttp session"""
+        if self.session:
+            await self.session.close()
 
     async def validate_proxy(self, proxy: str) -> bool:
         """Check if a proxy is working"""
@@ -65,7 +70,7 @@ class ProxyBot:
                 timeout=PROXY_CHECK_TIMEOUT
             ) as response:
                 return response.status == 200
-        except:
+        except Exception:
             return False
 
     async def fetch_proxies_from_source(self, source: dict) -> Set[str]:
@@ -81,7 +86,7 @@ class ProxyBot:
                             proxies.add(line)
                     return proxies
         except Exception as e:
-            print(f"Error fetching from {source['url']}: {e}")
+            print(f"Error fetching from {source['url']}: {str(e)}")
         return set()
 
     async def get_fresh_proxies(self, max_proxies: int = MAX_PROXIES_TO_RETURN) -> List[str]:
@@ -126,7 +131,6 @@ class ProxyBot:
             f.write("\n".join(proxies))
         return filename
 
-# Bot command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with bot commands"""
     welcome_text = """
@@ -152,7 +156,7 @@ I specialize in high-quality proxy services with:
 
 async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate and send fresh proxies"""
-    bot: ProxyBot = context.bot_data.get('proxy_bot')
+    bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error. Please try again.")
         return
@@ -194,14 +198,17 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error generating proxies: {str(e)}")
     finally:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=processing_msg.message_id
-        )
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=processing_msg.message_id
+            )
+        except Exception:
+            pass
 
 async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check proxies from a file"""
-    bot: ProxyBot = context.bot_data.get('proxy_bot')
+    bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error. Please try again.")
         return
@@ -248,30 +255,40 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error checking proxies: {str(e)}")
     finally:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=processing_msg.message_id
-        )
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=processing_msg.message_id
+            )
+        except Exception:
+            pass
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot statistics"""
-    bot: ProxyBot = context.bot_data.get('proxy_bot')
+    bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error. Please try again.")
         return
     
+    last_fetch = "Never" if not bot.last_proxy_fetch else datetime.fromtimestamp(bot.last_proxy_fetch).strftime('%Y-%m-%d %H:%M:%S')
+    
     stats_text = (
         "📊 *Proxy Master Bot Statistics*\n\n"
         f"🌐 Proxy Sources: {len(PROXY_SOURCES)}\n"
-        f"📦 Cached Proxies: {len(bot.cached_proxies) if bot.cached_proxies else 0}\n"
-        f"⏳ Last Fetch: {datetime.fromtimestamp(bot.last_proxy_fetch).strftime('%Y-%m-%d %H:%M:%S') if bot.last_proxy_fetch else 'Never'}\n\n"
+        f"📦 Cached Proxies: {len(bot.cached_proxies)}\n"
+        f"⏳ Last Fetch: {last_fetch}\n\n"
         "🔄 The bot automatically caches proxies for 30 minutes"
     )
     
     await update.message.reply_text(stats_text, parse_mode='Markdown')
 
-async def setup_commands(application: Application):
-    """Setup bot commands for better UX"""
+async def post_init(application: Application):
+    """Initialize bot after startup"""
+    proxy_bot = ProxyBot()
+    await proxy_bot.initialize()
+    application.bot_data['proxy_bot'] = proxy_bot
+    
+    # Set bot commands
     commands = [
         BotCommand("start", "Show welcome message"),
         BotCommand("genproxy", "Generate fresh proxies"),
@@ -280,38 +297,29 @@ async def setup_commands(application: Application):
     ]
     await application.bot.set_my_commands(commands)
 
-async def initialize_bot(application: Application):
-    """Initialize bot resources"""
-    application.bot_data['proxy_bot'] = ProxyBot()
-
-async def cleanup_bot(application: Application):
-    """Cleanup bot resources"""
+async def post_shutdown(application: Application):
+    """Cleanup resources before shutdown"""
     if 'proxy_bot' in application.bot_data:
         await application.bot_data['proxy_bot'].close()
 
 async def main():
     """Main application entry point"""
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
     
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("genproxy", gen_proxy))
     application.add_handler(CommandHandler("checkproxy", check_proxy))
     application.add_handler(CommandHandler("stats", stats))
-    
-    # Setup initialization and cleanup
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
-    application.post_init.setup_commands = setup_commands
-    application.post_init.initialize_bot = initialize_bot
-    application.post_shutdown.cleanup_bot = cleanup_bot
     
-    print("Bot is running...")
+    print("Bot is starting...")
     await application.run_polling()
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Bot stopped by user")
+        print("\nBot stopped by user")
     except Exception as e:
-        print(f"Fatal error: {e}")
+        print(f"Fatal error: {str(e)}")
