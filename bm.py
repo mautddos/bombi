@@ -4,8 +4,9 @@ import random
 import time
 import asyncio
 import aiohttp
+import json
 from datetime import datetime
-from typing import List, Set
+from typing import List, Set, Dict, Optional
 from telegram import Update, InputFile, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,9 +19,11 @@ from telegram.ext import (
 
 # Configuration
 TOKEN = "8180063318:AAG2FtpVESnPYKuEszDIaewy-LXgVXXDS-o"
-MAX_PROXIES_TO_RETURN = 500
+MAX_PROXIES_PER_FILE = 500  # To avoid too large files
 PROXY_CHECK_TIMEOUT = 10
 TEST_URL = "http://www.google.com"
+IPINFO_API = "https://ipinfo.io/{}/json"  # Free tier has 50k/month
+IPAPI_API = "http://ip-api.com/json/{}"  # Free tier has 45 requests/minute
 
 # Enhanced proxy sources
 PROXY_SOURCES = [
@@ -43,6 +46,11 @@ PROXY_SOURCES = [
         "url": "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
         "type": "http",
         "format": "ip:port"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list.txt",
+        "type": "http",
+        "format": "ip:port"
     }
 ]
 
@@ -51,6 +59,7 @@ class ProxyBot:
         self.session = None
         self.last_proxy_fetch = None
         self.cached_proxies = set()
+        self.geo_cache = {}  # Cache for IP geolocation
     
     async def initialize(self):
         """Initialize the aiohttp session"""
@@ -61,20 +70,69 @@ class ProxyBot:
         if self.session and not self.session.closed:
             await self.session.close()
 
-    async def validate_proxy(self, proxy: str) -> bool:
-        """Check if a proxy is working"""
+    async def get_ip_info(self, ip: str) -> Optional[Dict]:
+        """Get geolocation info for an IP"""
+        if ip in self.geo_cache:
+            return self.geo_cache[ip]
+        
         try:
+            async with self.session.get(IPAPI_API.format(ip), timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('status') == 'success':
+                        self.geo_cache[ip] = data
+                        return data
+        except Exception:
+            pass
+        
+        try:
+            async with self.session.get(IPINFO_API.format(ip), timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    self.geo_cache[ip] = data
+                    return data
+        except Exception:
+            pass
+        
+        return None
+
+    async def validate_proxy(self, proxy: str) -> Dict:
+        """Check if a proxy is working and return detailed info"""
+        ip = proxy.split(':')[0]
+        result = {
+            'proxy': proxy,
+            'working': False,
+            'country': 'Unknown',
+            'region': 'Unknown',
+            'city': 'Unknown',
+            'org': 'Unknown',
+            'latency': None
+        }
+        
+        try:
+            start_time = time.time()
             async with self.session.get(
                 TEST_URL,
                 proxy=f"http://{proxy}",
                 timeout=aiohttp.ClientTimeout(total=PROXY_CHECK_TIMEOUT)
             ) as response:
-                # Check both status code and content length to ensure it's not just a connection
-                return response.status == 200 and (await response.text())
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            return False
-        except Exception:
-            return False
+                if response.status == 200:
+                    result['working'] = True
+                    result['latency'] = round((time.time() - start_time) * 1000, 2)  # ms
+                    
+                    # Get geolocation info
+                    geo_info = await self.get_ip_info(ip)
+                    if geo_info:
+                        result.update({
+                            'country': geo_info.get('country', 'Unknown'),
+                            'region': geo_info.get('region', 'Unknown'),
+                            'city': geo_info.get('city', 'Unknown'),
+                            'org': geo_info.get('org', geo_info.get('isp', 'Unknown'))
+                        })
+        except Exception as e:
+            pass
+        
+        return result
 
     async def fetch_proxies_from_source(self, source: dict) -> Set[str]:
         """Fetch proxies from a single source"""
@@ -92,10 +150,13 @@ class ProxyBot:
             print(f"Error fetching from {source['url']}: {str(e)}")
         return set()
 
-    async def get_fresh_proxies(self, max_proxies: int = MAX_PROXIES_TO_RETURN) -> List[str]:
+    async def get_fresh_proxies(self, max_proxies: int = None) -> List[str]:
         """Get fresh proxies from multiple sources"""
         if self.cached_proxies and self.last_proxy_fetch and (time.time() - self.last_proxy_fetch < 1800):
-            return random.sample(list(self.cached_proxies), min(max_proxies, len(self.cached_proxies)))
+            proxies = list(self.cached_proxies)
+            if max_proxies:
+                return random.sample(proxies, min(max_proxies, len(proxies)))
+            return proxies
         
         tasks = [self.fetch_proxies_from_source(source) for source in PROXY_SOURCES]
         results = await asyncio.gather(*tasks)
@@ -107,27 +168,31 @@ class ProxyBot:
         self.cached_proxies = new_proxies
         self.last_proxy_fetch = time.time()
         
-        return random.sample(list(new_proxies), min(max_proxies, len(new_proxies)))
+        proxies = list(new_proxies)
+        if max_proxies:
+            return random.sample(proxies, min(max_proxies, len(proxies)))
+        return proxies
 
-    async def check_proxies_from_file(self, file_path: str) -> List[str]:
-        """Check proxies from a file and return working ones"""
+    async def check_proxies_from_file(self, file_path: str) -> List[Dict]:
+        """Check proxies from a file and return detailed info"""
         with open(file_path, 'r') as f:
             proxies = [line.strip() for line in f if line.strip()]
         
         if not proxies:
             return []
         
-        # Check proxies in batches to avoid overwhelming the system
-        batch_size = 20
-        working_proxies = []
+        # Check proxies in batches
+        batch_size = 10  # Smaller batch size for geo lookups
+        checked_proxies = []
         
         for i in range(0, len(proxies), batch_size):
             batch = proxies[i:i + batch_size]
             tasks = [self.validate_proxy(proxy) for proxy in batch]
             results = await asyncio.gather(*tasks)
-            working_proxies.extend([proxy for proxy, is_valid in zip(batch, results) if is_valid])
+            checked_proxies.extend(results)
+            await asyncio.sleep(1)  # Rate limiting for geo API
         
-        return working_proxies
+        return checked_proxies
 
     def create_proxy_file(self, proxies: List[str], prefix: str = "proxies") -> str:
         """Create a temporary proxy file"""
@@ -138,48 +203,52 @@ class ProxyBot:
             f.write("\n".join(proxies))
         return filename
 
+    def create_detailed_report(self, proxies: List[Dict], prefix: str = "report") -> str:
+        """Create a detailed CSV report"""
+        if not os.path.exists('temp'):
+            os.makedirs('temp')
+        filename = f"temp/{prefix}_{int(time.time())}.csv"
+        
+        with open(filename, 'w') as f:
+            f.write("Status,Proxy,Country,Region,City,Organization,Latency(ms)\n")
+            for proxy in proxies:
+                status = "✅" if proxy['working'] else "❌"
+                f.write(f"{status},{proxy['proxy']},{proxy['country']},{proxy['region']},"
+                        f"{proxy['city']},{proxy['org']},{proxy['latency'] or ''}\n")
+        
+        return filename
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
     welcome_text = """
-🚀 *Proxy Master Bot* 🚀
+🚀 *Advanced Proxy Bot* 🚀
 
 Available commands:
 /start - Show this message
-/genproxy [amount] - Generate fresh proxies (default: 100, max: 500)
-/checkproxy - Validate proxies (reply to a .txt file with proxies)
+/genproxy [amount] - Generate proxies (default: all, max per file: 500)
+/massproxy [total] [per_file] - Generate large amounts with multiple files
+/checkproxy - Validate proxies (reply to .txt file)
 /stats - Show bot statistics
 
 Examples:
-/genproxy 50 - Get 50 fresh proxies
-/genproxy - Get 100 proxies (default)
+/genproxy - Get all available proxies
+/genproxy 100 - Get 100 random proxies
+/massproxy 1000 200 - Get 1000 proxies in 5 files of 200 each
 """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
 async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate proxies with amount handling"""
+    """Generate proxies with optional amount"""
     bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error")
         return
     
-    # Default amount
-    amount = 100
+    amount = None
+    if context.args and context.args[0].isdigit():
+        amount = min(int(context.args[0]), MAX_PROXIES_PER_FILE)
     
-    # Check if user provided an amount
-    if context.args:
-        try:
-            amount = int(context.args[0])
-            if amount <= 0:
-                await update.message.reply_text("❌ Please provide a positive number")
-                return
-            if amount > MAX_PROXIES_TO_RETURN:
-                await update.message.reply_text(f"⚠️ Maximum is {MAX_PROXIES_TO_RETURN}. I'll return {MAX_PROXIES_TO_RETURN} proxies")
-                amount = MAX_PROXIES_TO_RETURN
-        except ValueError:
-            await update.message.reply_text("❌ Please provide a valid number")
-            return
-    
-    msg = await update.message.reply_text(f"🔄 Gathering {amount} proxies...")
+    msg = await update.message.reply_text(f"🔄 Gathering {'all' if not amount else amount} proxies...")
     
     try:
         proxies = await bot.get_fresh_proxies(amount)
@@ -191,22 +260,69 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(filename, 'rb') as f:
             await update.message.reply_document(
                 document=InputFile(f),
-                caption=f"✅ {len(proxies)} fresh proxies\n\nFormat: ip:port"
+                caption=f"✅ {len(proxies)} proxies\n\nFormat: ip:port"
             )
         os.remove(filename)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
     finally:
         try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=msg.message_id
-            )
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg.message_id)
+        except Exception:
+            pass
+
+async def mass_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate large amounts of proxies in multiple files"""
+    bot = context.bot_data.get('proxy_bot')
+    if not bot:
+        await update.message.reply_text("❌ Bot initialization error")
+        return
+    
+    if not context.args or len(context.args) < 2 or not all(arg.isdigit() for arg in context.args[:2]):
+        await update.message.reply_text("❌ Usage: /massproxy [total_amount] [proxies_per_file]")
+        return
+    
+    total = int(context.args[0])
+    per_file = min(int(context.args[1]), MAX_PROXIES_PER_FILE)
+    files_needed = (total + per_file - 1) // per_file
+    
+    if total > 10000:
+        await update.message.reply_text("⚠️ Very large amounts may take long time to gather")
+    
+    msg = await update.message.reply_text(f"🔄 Gathering {total} proxies in {files_needed} files...")
+    
+    try:
+        all_proxies = await bot.get_fresh_proxies()  # Get all available
+        if not all_proxies:
+            await update.message.reply_text("❌ Failed to fetch proxies")
+            return
+        
+        # Shuffle and take requested amount
+        random.shuffle(all_proxies)
+        proxies = all_proxies[:min(total, len(all_proxies))]
+        
+        # Split into chunks
+        for i in range(0, len(proxies), per_file):
+            chunk = proxies[i:i + per_file]
+            filename = bot.create_proxy_file(chunk, f"proxies_{i//per_file+1}")
+            with open(filename, 'rb') as f:
+                await update.message.reply_document(
+                    document=InputFile(f),
+                    caption=f"📁 File {i//per_file + 1}/{files_needed} - {len(chunk)} proxies"
+                )
+            os.remove(filename)
+        
+        await update.message.reply_text(f"✅ Sent {len(proxies)} proxies in {files_needed} files")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+    finally:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg.message_id)
         except Exception:
             pass
 
 async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check proxies from file with better feedback"""
+    """Check proxies with detailed report"""
     bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error")
@@ -221,53 +337,59 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please send a .txt file")
         return
     
-    msg = await update.message.reply_text("🔍 Checking proxies... This may take a while")
+    msg = await update.message.reply_text("🔍 Checking proxies... This may take several minutes")
     
     try:
-        # Download the file
         file_obj = await context.bot.get_file(file.file_id)
         downloaded_file = await file_obj.download_to_drive()
         
-        # Count total proxies in file
+        # Count total proxies
         with open(downloaded_file, 'r') as f:
-            total_proxies = sum(1 for line in f if line.strip())
+            total = sum(1 for line in f if line.strip())
         
-        if total_proxies == 0:
+        if total == 0:
             await update.message.reply_text("❌ The file is empty or contains no valid proxies")
             os.remove(downloaded_file)
             return
         
-        # Update user on progress
-        await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
-            message_id=msg.message_id,
-            text=f"🔍 Checking {total_proxies} proxies... (0/{total_proxies})"
+        # Check proxies
+        checked_proxies = await bot.check_proxies_from_file(downloaded_file)
+        working_proxies = [p for p in checked_proxies if p['working']]
+        
+        # Create detailed report
+        report_file = bot.create_detailed_report(checked_proxies)
+        
+        # Send results
+        result_text = (
+            f"📊 Proxy Check Results:\n"
+            f"✅ Working: {len(working_proxies)}\n"
+            f"❌ Failed: {len(checked_proxies) - len(working_proxies)}\n"
+            f"📝 Success rate: {len(working_proxies)/len(checked_proxies):.1%}"
         )
         
-        # Check proxies with progress updates
-        working_proxies = await bot.check_proxies_from_file(downloaded_file)
+        with open(report_file, 'rb') as f:
+            await update.message.reply_document(
+                document=InputFile(f),
+                caption=result_text
+            )
         
-        # Create result file
+        # Send working proxies separately
         if working_proxies:
-            filename = bot.create_proxy_file(working_proxies, "working_proxies")
-            with open(filename, 'rb') as f:
+            working_file = bot.create_proxy_file([p['proxy'] for p in working_proxies], "working_proxies")
+            with open(working_file, 'rb') as f:
                 await update.message.reply_document(
                     document=InputFile(f),
-                    caption=f"✅ Working: {len(working_proxies)}\n❌ Failed: {total_proxies - len(working_proxies)}\n\nSuccess rate: {len(working_proxies)/total_proxies:.1%}"
+                    caption="✅ Working proxies"
                 )
-            os.remove(filename)
-        else:
-            await update.message.reply_text("❌ No working proxies found")
+            os.remove(working_file)
         
         os.remove(downloaded_file)
+        os.remove(report_file)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
     finally:
         try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=msg.message_id
-            )
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg.message_id)
         except Exception:
             pass
 
@@ -284,7 +406,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🌐 Sources: {len(PROXY_SOURCES)}
 📦 Cached proxies: {len(bot.cached_proxies)}
 ⏳ Last fetch: {last_fetch}
-⚡ Max proxies per request: {MAX_PROXIES_TO_RETURN}
+📁 Max per file: {MAX_PROXIES_PER_FILE}
 """
     await update.message.reply_text(stats_text, parse_mode='Markdown')
 
@@ -296,9 +418,10 @@ async def setup_bot(application: Application):
     
     await application.bot.set_my_commands([
         BotCommand("start", "Show help"),
-        BotCommand("genproxy", "Generate proxies (default: 100)"),
-        BotCommand("checkproxy", "Check proxies in file"),
-        BotCommand("stats", "Show bot stats")
+        BotCommand("genproxy", "Generate proxies"),
+        BotCommand("massproxy", "Generate large amounts"),
+        BotCommand("checkproxy", "Check proxies"),
+        BotCommand("stats", "Show stats")
     ])
 
 async def shutdown_bot(application: Application):
@@ -313,12 +436,12 @@ async def shutdown_bot(application: Application):
 
 def run_bot():
     """Run the bot with proper event loop handling"""
-    # Create the Application and pass it your bot's token.
     application = ApplicationBuilder().token(TOKEN).build()
     
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("genproxy", gen_proxy))
+    application.add_handler(CommandHandler("massproxy", mass_proxy))
     application.add_handler(CommandHandler("checkproxy", check_proxy))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
