@@ -2,16 +2,17 @@ import os
 import requests
 import random
 import time
+import asyncio
 from telegram import Update, InputFile
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters
 )
 
-# Your actual bot token
+# Your bot token
 TOKEN = "7589335242:AAHHwteKQ7Keo4PRQVUv7nFlLV1tj1c3cYw"
 
 # Proxy sources
@@ -67,6 +68,7 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📝 Format: IP:PORT\n"
                     f"⏳ Generated at: {time.ctime()}"
         )
+
     os.remove(filename)
 
 async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,7 +93,7 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.remove(downloaded_file)
         return
 
-    await update.message.reply_text(f"🔍 Found {len(proxies)} proxies. Checking validity... This may take a while.")
+    await update.message.reply_text(f"🔍 Found {len(proxies)} proxies. Checking validity...")
 
     working_proxies = []
     test_url = "http://www.google.com"
@@ -134,6 +136,9 @@ async def main():
     print("Bot is running...")
     await app.run_polling()
 
+# Safe launch on VPS
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except KeyboardInterrupt:
+        print("Bot stopped by user.")
