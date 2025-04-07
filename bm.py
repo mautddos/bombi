@@ -263,6 +263,7 @@ async def shutdown_bot(application: Application):
 
 def run_bot():
     """Run the bot with proper event loop handling"""
+    # Create the Application and pass it your bot's token.
     application = ApplicationBuilder().token(TOKEN).build()
     
     # Register handlers
@@ -274,8 +275,11 @@ def run_bot():
     
     # Setup initialization and shutdown
     application.add_handler(MessageHandler(filters.ALL, start))  # Fallback handler
-    application.post_init(setup_bot)
-    application.post_shutdown(shutdown_bot)
+    application.add_handler(CommandHandler("start", start))  # Duplicate but ensures it's registered
+    
+    # Setup post_init and post_shutdown
+    application.post_init = setup_bot
+    application.post_shutdown = shutdown_bot
     
     print("Bot is starting...")
     application.run_polling()
