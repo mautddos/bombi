@@ -67,9 +67,12 @@ class ProxyBot:
             async with self.session.get(
                 TEST_URL,
                 proxy=f"http://{proxy}",
-                timeout=PROXY_CHECK_TIMEOUT
+                timeout=aiohttp.ClientTimeout(total=PROXY_CHECK_TIMEOUT)
             ) as response:
-                return response.status == 200
+                # Check both status code and content length to ensure it's not just a connection
+                return response.status == 200 and (await response.text())
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            return False
         except Exception:
             return False
 
@@ -114,14 +117,23 @@ class ProxyBot:
         if not proxies:
             return []
         
-        tasks = [self.validate_proxy(proxy) for proxy in proxies]
-        results = await asyncio.gather(*tasks)
+        # Check proxies in batches to avoid overwhelming the system
+        batch_size = 20
+        working_proxies = []
         
-        return [proxy for proxy, is_valid in zip(proxies, results) if is_valid]
+        for i in range(0, len(proxies), batch_size):
+            batch = proxies[i:i + batch_size]
+            tasks = [self.validate_proxy(proxy) for proxy in batch]
+            results = await asyncio.gather(*tasks)
+            working_proxies.extend([proxy for proxy, is_valid in zip(batch, results) if is_valid])
+        
+        return working_proxies
 
     def create_proxy_file(self, proxies: List[str], prefix: str = "proxies") -> str:
         """Create a temporary proxy file"""
-        filename = f"{prefix}_{int(time.time())}.txt"
+        if not os.path.exists('temp'):
+            os.makedirs('temp')
+        filename = f"temp/{prefix}_{int(time.time())}.txt"
         with open(filename, 'w') as f:
             f.write("\n".join(proxies))
         return filename
@@ -133,29 +145,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Available commands:
 /start - Show this message
-/genproxy - Generate fresh proxies
-/checkproxy - Validate proxies (reply to .txt file)
+/genproxy [amount] - Generate fresh proxies (default: 100, max: 500)
+/checkproxy - Validate proxies (reply to a .txt file with proxies)
 /stats - Show bot statistics
+
+Examples:
+/genproxy 50 - Get 50 fresh proxies
+/genproxy - Get 100 proxies (default)
 """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
 async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate proxies"""
+    """Generate proxies with amount handling"""
     bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error")
         return
     
-    args = context.args
-    max_proxies = MAX_PROXIES_TO_RETURN
+    # Default amount
+    amount = 100
     
-    if args and args[0].isdigit():
-        max_proxies = min(int(args[0]), MAX_PROXIES_TO_RETURN)
+    # Check if user provided an amount
+    if context.args:
+        try:
+            amount = int(context.args[0])
+            if amount <= 0:
+                await update.message.reply_text("❌ Please provide a positive number")
+                return
+            if amount > MAX_PROXIES_TO_RETURN:
+                await update.message.reply_text(f"⚠️ Maximum is {MAX_PROXIES_TO_RETURN}. I'll return {MAX_PROXIES_TO_RETURN} proxies")
+                amount = MAX_PROXIES_TO_RETURN
+        except ValueError:
+            await update.message.reply_text("❌ Please provide a valid number")
+            return
     
-    msg = await update.message.reply_text("🔄 Gathering proxies...")
+    msg = await update.message.reply_text(f"🔄 Gathering {amount} proxies...")
     
     try:
-        proxies = await bot.get_fresh_proxies(max_proxies)
+        proxies = await bot.get_fresh_proxies(amount)
         if not proxies:
             await update.message.reply_text("❌ Failed to fetch proxies")
             return
@@ -164,7 +191,7 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(filename, 'rb') as f:
             await update.message.reply_document(
                 document=InputFile(f),
-                caption=f"✅ {len(proxies)} fresh proxies"
+                caption=f"✅ {len(proxies)} fresh proxies\n\nFormat: ip:port"
             )
         os.remove(filename)
     except Exception as e:
@@ -179,14 +206,14 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check proxies"""
+    """Check proxies from file with better feedback"""
     bot = context.bot_data.get('proxy_bot')
     if not bot:
         await update.message.reply_text("❌ Bot initialization error")
         return
     
     if not update.message.reply_to_message or not update.message.reply_to_message.document:
-        await update.message.reply_text("❌ Reply to a .txt file")
+        await update.message.reply_text("❌ Please reply to a message containing a .txt file")
         return
     
     file = update.message.reply_to_message.document
@@ -194,28 +221,45 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please send a .txt file")
         return
     
-    msg = await update.message.reply_text("📥 Checking proxies...")
+    msg = await update.message.reply_text("🔍 Checking proxies... This may take a while")
     
     try:
+        # Download the file
         file_obj = await context.bot.get_file(file.file_id)
         downloaded_file = await file_obj.download_to_drive()
         
-        working_proxies = await bot.check_proxies_from_file(downloaded_file)
-        total = sum(1 for _ in open(downloaded_file))
+        # Count total proxies in file
+        with open(downloaded_file, 'r') as f:
+            total_proxies = sum(1 for line in f if line.strip())
         
-        if not working_proxies:
-            await update.message.reply_text("❌ No working proxies found")
+        if total_proxies == 0:
+            await update.message.reply_text("❌ The file is empty or contains no valid proxies")
+            os.remove(downloaded_file)
             return
         
-        filename = bot.create_proxy_file(working_proxies, "working_proxies")
-        with open(filename, 'rb') as f:
-            await update.message.reply_document(
-                document=InputFile(f),
-                caption=f"✅ Working: {len(working_proxies)}\n❌ Failed: {total - len(working_proxies)}"
-            )
+        # Update user on progress
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=msg.message_id,
+            text=f"🔍 Checking {total_proxies} proxies... (0/{total_proxies})"
+        )
+        
+        # Check proxies with progress updates
+        working_proxies = await bot.check_proxies_from_file(downloaded_file)
+        
+        # Create result file
+        if working_proxies:
+            filename = bot.create_proxy_file(working_proxies, "working_proxies")
+            with open(filename, 'rb') as f:
+                await update.message.reply_document(
+                    document=InputFile(f),
+                    caption=f"✅ Working: {len(working_proxies)}\n❌ Failed: {total_proxies - len(working_proxies)}\n\nSuccess rate: {len(working_proxies)/total_proxies:.1%}"
+                )
+            os.remove(filename)
+        else:
+            await update.message.reply_text("❌ No working proxies found")
         
         os.remove(downloaded_file)
-        os.remove(filename)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
     finally:
@@ -236,12 +280,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     last_fetch = "Never" if not bot.last_proxy_fetch else datetime.fromtimestamp(bot.last_proxy_fetch).strftime('%Y-%m-%d %H:%M:%S')
     stats_text = f"""
-📊 Bot Statistics:
+📊 *Bot Statistics*:
 🌐 Sources: {len(PROXY_SOURCES)}
-📦 Cached: {len(bot.cached_proxies)}
+📦 Cached proxies: {len(bot.cached_proxies)}
 ⏳ Last fetch: {last_fetch}
+⚡ Max proxies per request: {MAX_PROXIES_TO_RETURN}
 """
-    await update.message.reply_text(stats_text)
+    await update.message.reply_text(stats_text, parse_mode='Markdown')
 
 async def setup_bot(application: Application):
     """Initialize bot"""
@@ -251,15 +296,20 @@ async def setup_bot(application: Application):
     
     await application.bot.set_my_commands([
         BotCommand("start", "Show help"),
-        BotCommand("genproxy", "Generate proxies"),
-        BotCommand("checkproxy", "Check proxies"),
-        BotCommand("stats", "Show stats")
+        BotCommand("genproxy", "Generate proxies (default: 100)"),
+        BotCommand("checkproxy", "Check proxies in file"),
+        BotCommand("stats", "Show bot stats")
     ])
 
 async def shutdown_bot(application: Application):
     """Cleanup bot"""
     if 'proxy_bot' in application.bot_data:
         await application.bot_data['proxy_bot'].close()
+    # Clean temp files
+    if os.path.exists('temp'):
+        for file in os.listdir('temp'):
+            os.remove(f"temp/{file}")
+        os.rmdir('temp')
 
 def run_bot():
     """Run the bot with proper event loop handling"""
@@ -274,10 +324,6 @@ def run_bot():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     
     # Setup initialization and shutdown
-    application.add_handler(MessageHandler(filters.ALL, start))  # Fallback handler
-    application.add_handler(CommandHandler("start", start))  # Duplicate but ensures it's registered
-    
-    # Setup post_init and post_shutdown
     application.post_init = setup_bot
     application.post_shutdown = shutdown_bot
     
