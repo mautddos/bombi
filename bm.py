@@ -3,7 +3,7 @@ import requests
 import random
 import time
 from telegram import Update, InputFile
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Replace with your actual bot token
 TOKEN = "7589335242:AAHHwteKQ7Keo4PRQVUv7nFlLV1tj1c3cYw"
