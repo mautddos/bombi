@@ -6,7 +6,8 @@ import asyncio
 import aiohttp
 import json
 from datetime import datetime
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Dict, Optional, Tuple
+from collections import defaultdict
 from telegram import Update, InputFile, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -24,6 +25,10 @@ PROXY_CHECK_TIMEOUT = 10
 TEST_URL = "http://www.google.com"
 IPINFO_API = "https://ipinfo.io/{}/json"  # Free tier has 50k/month
 IPAPI_API = "http://ip-api.com/json/{}"  # Free tier has 45 requests/minute
+
+# Rate limiting
+USER_COOLDOWN = 60  # Seconds between requests per user
+MAX_REQUESTS_PER_MINUTE = 5  # Global rate limit
 
 # Enhanced proxy sources
 PROXY_SOURCES = [
@@ -57,9 +62,12 @@ PROXY_SOURCES = [
 class ProxyBot:
     def __init__(self):
         self.session = None
-        self.last_proxy_fetch = None
-        self.cached_proxies = set()
-        self.geo_cache = {}  # Cache for IP geolocation
+        self.user_cache = defaultdict(dict)  # Separate cache per user
+        self.geo_cache = {}  # Shared geo cache (IP info doesn't change often)
+        self.last_global_fetch = None
+        self.global_proxies = set()
+        self.request_times = defaultdict(list)  # For rate limiting
+        self.lock = asyncio.Lock()  # For thread-safe operations
     
     async def initialize(self):
         """Initialize the aiohttp session"""
@@ -69,6 +77,29 @@ class ProxyBot:
         """Close the aiohttp session"""
         if self.session and not self.session.closed:
             await self.session.close()
+
+    async def check_rate_limit(self, user_id: int) -> Tuple[bool, int]:
+        """Check if user is rate limited, returns (allowed, seconds_remaining)"""
+        now = time.time()
+        async with self.lock:
+            # Remove old requests
+            self.request_times[user_id] = [
+                t for t in self.request_times[user_id] 
+                if now - t < 60
+            ]
+            
+            # Check global rate limit
+            if len(self.request_times[user_id]) >= MAX_REQUESTS_PER_MINUTE:
+                oldest = self.request_times[user_id][0]
+                return (False, 60 - int(now - oldest))
+            
+            # Check user cooldown
+            if self.request_times[user_id] and (now - self.request_times[user_id][-1]) < USER_COOLDOWN:
+                return (False, USER_COOLDOWN - int(now - self.request_times[user_id][-1]))
+            
+            # Record this request
+            self.request_times[user_id].append(now)
+            return (True, 0)
 
     async def get_ip_info(self, ip: str) -> Optional[Dict]:
         """Get geolocation info for an IP"""
@@ -150,28 +181,38 @@ class ProxyBot:
             print(f"Error fetching from {source['url']}: {str(e)}")
         return set()
 
-    async def get_fresh_proxies(self, max_proxies: int = None) -> List[str]:
-        """Get fresh proxies from multiple sources"""
-        if self.cached_proxies and self.last_proxy_fetch and (time.time() - self.last_proxy_fetch < 1800):
-            proxies = list(self.cached_proxies)
+    async def get_fresh_proxies(self, user_id: int, max_proxies: int = None) -> List[str]:
+        """Get fresh proxies for a specific user"""
+        # Check rate limit first
+        allowed, remaining = await self.check_rate_limit(user_id)
+        if not allowed:
+            raise Exception(f"Please wait {remaining} seconds before making another request")
+        
+        # Check if we have a recent global fetch
+        async with self.lock:
+            if not self.global_proxies or not self.last_global_fetch or (time.time() - self.last_global_fetch > 1800):
+                tasks = [self.fetch_proxies_from_source(source) for source in PROXY_SOURCES]
+                results = await asyncio.gather(*tasks)
+                
+                new_proxies = set()
+                for proxy_set in results:
+                    new_proxies.update(proxy_set)
+                
+                self.global_proxies = new_proxies
+                self.last_global_fetch = time.time()
+            
+            # Get user-specific cache
+            user_data = self.user_cache[user_id]
+            if 'proxies' not in user_data or 'timestamp' not in user_data or (time.time() - user_data['timestamp'] > 300):
+                # Refresh user's cache
+                user_data['proxies'] = list(self.global_proxies)
+                user_data['timestamp'] = time.time()
+            
+            proxies = user_data['proxies']
+            
             if max_proxies:
                 return random.sample(proxies, min(max_proxies, len(proxies)))
             return proxies
-        
-        tasks = [self.fetch_proxies_from_source(source) for source in PROXY_SOURCES]
-        results = await asyncio.gather(*tasks)
-        
-        new_proxies = set()
-        for proxy_set in results:
-            new_proxies.update(proxy_set)
-        
-        self.cached_proxies = new_proxies
-        self.last_proxy_fetch = time.time()
-        
-        proxies = list(new_proxies)
-        if max_proxies:
-            return random.sample(proxies, min(max_proxies, len(proxies)))
-        return proxies
 
     async def check_proxies_from_file(self, file_path: str) -> List[Dict]:
         """Check proxies from a file and return detailed info"""
@@ -244,6 +285,7 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bot initialization error")
         return
     
+    user_id = update.effective_user.id
     amount = None
     if context.args and context.args[0].isdigit():
         amount = min(int(context.args[0]), MAX_PROXIES_PER_FILE)
@@ -251,7 +293,7 @@ async def gen_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(f"🔄 Gathering {'all' if not amount else amount} proxies...")
     
     try:
-        proxies = await bot.get_fresh_proxies(amount)
+        proxies = await bot.get_fresh_proxies(user_id, amount)
         if not proxies:
             await update.message.reply_text("❌ Failed to fetch proxies")
             return
@@ -278,6 +320,8 @@ async def mass_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bot initialization error")
         return
     
+    user_id = update.effective_user.id
+    
     if not context.args or len(context.args) < 2 or not all(arg.isdigit() for arg in context.args[:2]):
         await update.message.reply_text("❌ Usage: /massproxy [total_amount] [proxies_per_file]")
         return
@@ -292,7 +336,12 @@ async def mass_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(f"🔄 Gathering {total} proxies in {files_needed} files...")
     
     try:
-        all_proxies = await bot.get_fresh_proxies()  # Get all available
+        # Check rate limit first
+        allowed, remaining = await bot.check_rate_limit(user_id)
+        if not allowed:
+            raise Exception(f"Please wait {remaining} seconds before making another request")
+        
+        all_proxies = await bot.get_fresh_proxies(user_id)  # Get all available for this user
         if not all_proxies:
             await update.message.reply_text("❌ Failed to fetch proxies")
             return
@@ -328,8 +377,16 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bot initialization error")
         return
     
+    user_id = update.effective_user.id
+    
     if not update.message.reply_to_message or not update.message.reply_to_message.document:
         await update.message.reply_text("❌ Please reply to a message containing a .txt file")
+        return
+    
+    # Check rate limit first
+    allowed, remaining = await bot.check_rate_limit(user_id)
+    if not allowed:
+        await update.message.reply_text(f"❌ Please wait {remaining} seconds before making another request")
         return
     
     file = update.message.reply_to_message.document
@@ -351,6 +408,9 @@ async def check_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ The file is empty or contains no valid proxies")
             os.remove(downloaded_file)
             return
+        
+        if total > 1000:
+            await update.message.reply_text("⚠️ Large files may take a very long time to check")
         
         # Check proxies
         checked_proxies = await bot.check_proxies_from_file(downloaded_file)
@@ -400,13 +460,14 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bot initialization error")
         return
     
-    last_fetch = "Never" if not bot.last_proxy_fetch else datetime.fromtimestamp(bot.last_proxy_fetch).strftime('%Y-%m-%d %H:%M:%S')
+    last_fetch = "Never" if not bot.last_global_fetch else datetime.fromtimestamp(bot.last_global_fetch).strftime('%Y-%m-%d %H:%M:%S')
     stats_text = f"""
 📊 *Bot Statistics*:
 🌐 Sources: {len(PROXY_SOURCES)}
-📦 Cached proxies: {len(bot.cached_proxies)}
+📦 Global proxies: {len(bot.global_proxies)}
 ⏳ Last fetch: {last_fetch}
 📁 Max per file: {MAX_PROXIES_PER_FILE}
+🚦 Active users: {len(bot.user_cache)}
 """
     await update.message.reply_text(stats_text, parse_mode='Markdown')
 
