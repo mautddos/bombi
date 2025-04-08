@@ -1,33 +1,75 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-import asyncio
+import os
+import requests
+import subprocess
+import tempfile
+from telegram import Update, Bot
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"  # Replace with your actual token
-STICKER_SET_NAME = "celebsex"  # From the URL https://t.me/addstickers/celebsex
+# Replace with your bot token
+TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "Welcome to the HLS Downloader Bot!\n\n"
+        "Send me an HLS (.m3u8) URL and I'll download and send you the video.\n\n"
+        "Example URL: https://example.com/video.m3u8"
+    )
+
+def download_hls(url: str) -> str:
+    """Download HLS stream and return path to the converted MP4 file"""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_file = os.path.join(tmp_dir, "output.mp4")
+        
+        # Use ffmpeg to download and convert the HLS stream
+        command = [
+            'ffmpeg',
+            '-i', url,
+            '-c', 'copy',
+            '-f', 'mp4',
+            output_file
+        ]
+        
+        try:
+            subprocess.run(command, check=True, stderr=subprocess.PIPE)
+            return output_file
+        except subprocess.CalledProcessError as e:
+            print(f"FFmpeg error: {e.stderr.decode()}")
+            raise Exception("Failed to download and convert the HLS stream")
+
+def handle_message(update: Update, context: CallbackContext) -> None:
+    url = update.message.text.strip()
+    
+    if not url.lower().endswith('.m3u8'):
+        update.message.reply_text("Please send a valid HLS (.m3u8) URL.")
+        return
+    
     try:
-        # Get the sticker set
-        sticker_set = await context.bot.get_sticker_set(STICKER_SET_NAME)
+        update.message.reply_text("⏳ Downloading and processing the video...")
         
-        # Send all stickers with delay to avoid flooding
-        await update.message.reply_text(f"Sending {len(sticker_set.stickers)} stickers...")
+        # Download and convert the HLS stream
+        video_path = download_hls(url)
         
-        for sticker in sticker_set.stickers:
-            try:
-                await update.message.reply_sticker(sticker.file_id)
-                await asyncio.sleep(0.5)  # Important delay to avoid rate limits
-            except Exception as e:
-                print(f"Error sending sticker: {e}")
-                continue
-                
+        # Send the video back to the user
+        with open(video_path, 'rb') as video_file:
+            update.message.reply_video(
+                video=video_file,
+                caption="Here's your downloaded video!",
+                supports_streaming=True
+            )
+            
     except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
+        update.message.reply_text(f"❌ Error: {str(e)}")
+        print(f"Error processing {url}: {str(e)}")
 
-def main():
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.run_polling()
+def main() -> None:
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
 
-if __name__ == "__main__":
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
     main()
