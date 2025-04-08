@@ -13,6 +13,7 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
+from telegram.error import BadRequest
 
 # Enable logging
 logging.basicConfig(
@@ -72,7 +73,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_msg = f"""
 🌟 *Welcome to SMS Bomber Bot* 🌟
 
-Hey {user.mention_markdown_v2()}! 
+Hey {user.mention_markdown_v2()}\\! 
 
 🚀 *Features:*
 - Send multiple SMS to a target number
@@ -81,12 +82,12 @@ Hey {user.mention_markdown_v2()}!
 - Stop functionality with /stop command
 
 ⚠️ *Disclaimer:*
-This bot is for *educational purposes only*. Misuse may violate terms of service and could be illegal in some jurisdictions.
+This bot is for *educational purposes only*\\. Misuse may violate terms of service and could be illegal in some jurisdictions\\.
 
 📌 *How to use:*
-1. Click 'Start Attack' button
-2. Send the target phone number when asked
-3. Use /stop to end the attack
+1\\. Click 'Start Attack' button
+2\\. Send the target phone number when asked
+3\\. Use /stop to end the attack
     """
     
     keyboard = [
@@ -95,7 +96,11 @@ This bot is for *educational purposes only*. Misuse may violate terms of service
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_markdown_v2(welcome_msg, reply_markup=reply_markup)
+    try:
+        await update.message.reply_markdown_v2(welcome_msg, reply_markup=reply_markup)
+    except BadRequest as e:
+        logger.error(f"Error sending message: {e}")
+        await update.message.reply_text("Welcome to SMS Bomber Bot! Click the buttons below to get started.", reply_markup=reply_markup)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send help message."""
@@ -103,8 +108,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 📖 *Help Guide*
 
 🔹 To start an attack:
-1. Click 'Start Attack' button
-2. Send the 10-digit phone number when asked
+1\\. Click 'Start Attack' button
+2\\. Send the 10-digit phone number when asked
 
 🔹 To stop an attack:
 Send /stop command
@@ -115,9 +120,29 @@ Send /stop command
 - Repeat every 35 seconds
 - Stop functionality
 
-⚠️ Use responsibly!
+⚠️ Use responsibly\\!
     """
-    await update.message.reply_markdown_v2(help_text)
+    try:
+        await update.message.reply_markdown_v2(help_text)
+    except BadRequest:
+        await update.message.reply_text("""
+Help Guide
+
+To start an attack:
+1. Click 'Start Attack' button
+2. Send the 10-digit phone number when asked
+
+To stop an attack:
+Send /stop command
+
+Current Features:
+- Multiple API support
+- Simultaneous requests
+- Repeat every 35 seconds
+- Stop functionality
+
+Use responsibly!
+        """)
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button presses."""
@@ -280,8 +305,24 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Add error handler
+    application.add_error_handler(error_handler)
+
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors caused by updates."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    
+    if update and isinstance(update, Update):
+        try:
+            await update.message.reply_text("⚠️ An error occurred. Please try again.")
+        except:
+            try:
+                await update.callback_query.message.reply_text("⚠️ An error occurred. Please try again.")
+            except:
+                pass
 
 if __name__ == '__main__':
     main()
