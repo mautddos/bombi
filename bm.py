@@ -1,6 +1,6 @@
 import logging
-from telegram import Update, BotCommand
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
 # Enable logging
 logging.basicConfig(
@@ -14,9 +14,6 @@ BOT_TOKEN = "8180063318:AAG2FtpVESnPYKuEszDIaewy-LXgVXXDS-o"
 CHANNEL_ID = -1002441094491  # Private channel ID (with -100 prefix)
 ADMIN_USER_IDS = [8167507955]  # Your user ID(s) who can control the bot
 
-# List of video message IDs from the channel
-VIDEO_MESSAGE_IDS = [8915, 8916, 8917]  # Example message IDs from your channel
-
 async def is_admin(update: Update) -> bool:
     """Check if user is admin."""
     return update.effective_user.id in ADMIN_USER_IDS
@@ -25,76 +22,91 @@ async def post_init(application: Application) -> None:
     """Post initialization - set bot commands."""
     await application.bot.set_my_commands([
         BotCommand("start", "Start the bot"),
-        BotCommand("sendvideos", "Send all videos from private channel"),
-        BotCommand("sendvideo", "Send specific video (usage: /sendvideo [id])")
+        BotCommand("menu", "Show video menu")
     ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a welcome message."""
+    """Send welcome message."""
     if not await is_admin(update):
         await update.message.reply_text("⚠️ You are not authorized to use this bot.")
         return
     
-    commands = [
-        "/start - Show this message",
-        "/sendvideos - Send all videos from private channel",
-        "/sendvideo [id] - Send specific video by message ID",
-        "",
-        f"Channel ID: {CHANNEL_ID}",
-        "Example private link: https://t.me/c/2441094491/8915"
+    await show_main_menu(update, context)
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the main menu with video options."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Dasi video 1", callback_data="video_1"),
+            InlineKeyboardButton("Dasi video 2", callback_data="video_2"),
+            InlineKeyboardButton("Dasi video 3", callback_data="video_3")
+        ],
+        [
+            InlineKeyboardButton("Dasi video 4", callback_data="video_4"),
+            InlineKeyboardButton("Dasi video 5", callback_data="video_5"),
+            InlineKeyboardButton("Dasi video 6", callback_data="video_6")
+        ],
+        [
+            InlineKeyboardButton("Dasi video 7", callback_data="video_7"),
+            InlineKeyboardButton("Dasi video 8", callback_data="video_8"),
+            InlineKeyboardButton("Dasi video 9", callback_data="video_9")
+        ],
+        [
+            InlineKeyboardButton("Dasi video 10", callback_data="video_10"),
+            InlineKeyboardButton("Back to Main", callback_data="main_menu")
+        ]
     ]
     
-    await update.message.reply_text("\n".join(commands))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text="*ㅤ*",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            text="*ㅤ*",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
-async def send_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send all videos from the channel."""
+async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button presses."""
+    query = update.callback_query
+    await query.answer()
+    
     if not await is_admin(update):
-        await update.message.reply_text("⚠️ You are not authorized to use this command.")
+        await query.edit_message_text("⚠️ You are not authorized to use this bot.")
         return
     
-    chat_id = update.effective_chat.id
-    bot = context.bot
-    
-    await update.message.reply_text(f"⏳ Preparing to send {len(VIDEO_MESSAGE_IDS)} videos...")
-    
-    success_count = 0
-    for msg_id in VIDEO_MESSAGE_IDS:
+    if query.data == "main_menu":
+        await show_main_menu(update, context)
+    elif query.data.startswith("video_"):
+        video_num = query.data.split("_")[1]
+        msg_id = {
+            "1": 8915,
+            "2": 8916,
+            "3": 8917,
+            "4": 8918,
+            "5": 8919,
+            "6": 8920,
+            "7": 8921,
+            "8": 8922,
+            "9": 8923,
+            "10": 8924
+        }.get(video_num, 8915)  # Default to first video if not found
+        
         try:
-            # Copy the message instead of forwarding to preserve original sender
-            await bot.copy_message(
-                chat_id=chat_id,
+            await context.bot.copy_message(
+                chat_id=query.message.chat_id,
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id
             )
-            success_count += 1
         except Exception as e:
             logger.error(f"Failed to send video {msg_id}: {e}")
-            await update.message.reply_text(f"❌ Failed to send video ID {msg_id}")
-    
-    await update.message.reply_text(f"✅ Done! Successfully sent {success_count}/{len(VIDEO_MESSAGE_IDS)} videos")
-
-async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send specific video by message ID."""
-    if not await is_admin(update):
-        await update.message.reply_text("⚠️ You are not authorized to use this command.")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("ℹ️ Usage: /sendvideo [message_id]\nExample: /sendvideo 8915")
-        return
-    
-    try:
-        msg_id = int(context.args[0])
-        await context.bot.copy_message(
-            chat_id=update.effective_chat.id,
-            from_chat_id=CHANNEL_ID,
-            message_id=msg_id
-        )
-    except ValueError:
-        await update.message.reply_text("❌ Invalid message ID. Please provide a number.")
-    except Exception as e:
-        logger.error(f"Failed to send video {msg_id}: {e}")
-        await update.message.reply_text(f"❌ Failed to send video ID {msg_id}")
+            await query.message.reply_text(f"❌ Failed to send video {video_num}")
 
 def main() -> None:
     """Start the bot."""
@@ -102,8 +114,10 @@ def main() -> None:
 
     # Command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("sendvideos", send_videos))
-    application.add_handler(CommandHandler("sendvideo", send_video))
+    application.add_handler(CommandHandler("menu", show_main_menu))
+    
+    # Button handler
+    application.add_handler(CallbackQueryHandler(handle_button))
 
     # Run the bot
     application.run_polling()
