@@ -1,5 +1,4 @@
 import requests
-import random
 import logging
 import asyncio
 import concurrent.futures
@@ -55,6 +54,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Click 'Start Attack' to begin.",
         reply_markup=reply_markup
     )
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callbacks"""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'start_attack':
+        await query.edit_message_text(text="🔢 Please send the 10-digit phone number now")
+        context.user_data['expecting_number'] = True
+    elif query.data == 'help':
+        await help_command(update, context)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show help information"""
+    await update.message.reply_text(
+        "📖 Help Guide:\n\n"
+        "1. Click 'Start Attack'\n"
+        "2. Send phone number when asked\n"
+        "3. Use /stop to end attack\n\n"
+        "⚠️ For educational purposes only!"
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming messages"""
+    if context.user_data.get('expecting_number', False):
+        phone_number = update.message.text.strip()
+        
+        if not phone_number.isdigit() or len(phone_number) != 10:
+            await update.message.reply_text("❌ Invalid number. Please send 10 digits.")
+            return
+            
+        context.user_data['expecting_number'] = False
+        await start_attack(update, context, phone_number)
 
 async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str) -> None:
     """Start the attack process"""
@@ -163,6 +195,7 @@ def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stop", stop_attack))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
