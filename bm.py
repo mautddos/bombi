@@ -7,88 +7,135 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 
 TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"
 
+# Custom headers to mimic a browser request
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Origin': 'https://example.com',
+    'Referer': 'https://example.com/',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'cross-site'
+}
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Welcome to the HLS Video Downloader Bot!\n\n"
-        "Send me an HLS (.m3u8) URL and I'll download and send you the video."
+        "🚀 Advanced HLS Downloader Bot\n\n"
+        "Send me an HLS (.m3u8) URL and I'll process it for you\n\n"
+        "Note: Large videos may take several minutes"
     )
 
+def verify_hls_url(url: str) -> bool:
+    """Check if HLS URL is accessible with custom headers"""
+    try:
+        response = requests.head(url, headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            return True
+        
+        # Try with GET if HEAD fails
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        return response.status_code == 200
+        
+    except requests.RequestException:
+        return False
+
 def download_hls(url: str) -> str:
-    """Download HLS stream and return path to the converted MP4 file"""
+    """Download protected HLS stream with headers"""
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_file = os.path.join(tmp_dir, "output.mp4")
         
-        # First verify the URL is accessible
-        try:
-            response = requests.head(url, timeout=10)
-            if response.status_code != 200:
-                raise Exception("HLS URL not accessible")
-        except requests.RequestException:
-            raise Exception("Could not connect to HLS server")
-        
-        # Use ffmpeg to download and convert
+        # FFmpeg command with headers
         command = [
             'ffmpeg',
+            '-headers', '\r\n'.join(f'{k}: {v}' for k, v in HEADERS.items()),
             '-i', url,
-            '-c', 'copy',         # Copy streams without re-encoding
-            '-f', 'mp4',         # Output format
-            '-movflags', 'frag_keyframe+empty_moov',  # For streaming
+            '-c', 'copy',
+            '-f', 'mp4',
+            '-movflags', 'frag_keyframe+empty_moov',
             output_file
         ]
         
         try:
-            subprocess.run(command, check=True, stderr=subprocess.PIPE, timeout=300)
+            subprocess.run(command, check=True, stderr=subprocess.PIPE, timeout=600)
             return output_file
         except subprocess.TimeoutExpired:
-            raise Exception("Download timed out after 5 minutes")
+            raise Exception("Server took too long to respond (10 minute timeout)")
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode() if e.stderr else "Unknown error"
-            raise Exception(f"FFmpeg error: {error_msg}")
+            error = e.stderr.decode('utf-8', errors='ignore') if e.stderr else str(e)
+            if "403 Forbidden" in error:
+                raise Exception("Server blocked our request (403 Forbidden)")
+            elif "404 Not Found" in error:
+                raise Exception("Video not found (404)")
+            else:
+                raise Exception(f"Download failed: {error[:200]}...")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     url = update.message.text.strip()
     
-    if not url.lower().endswith('.m3u8'):
-        await update.message.reply_text("Please send a valid HLS (.m3u8) URL.")
+    if not url.lower().endswith(('.m3u8', '.mp4')):
+        await update.message.reply_text("🔍 Please send a valid HLS (.m3u8) or MP4 URL")
         return
     
     try:
-        msg = await update.message.reply_text("⏳ Downloading HLS stream... (This may take a while)")
+        # Check URL first
+        status_msg = await update.message.reply_text("🔍 Checking URL accessibility...")
+        
+        if not verify_hls_url(url):
+            await status_msg.edit_text("❌ URL is not accessible. It may be:\n"
+                                     "- Expired\n- Geo-blocked\n- Require special headers\n"
+                                     "- Private/restricted content")
+            return
+            
+        await status_msg.edit_text("⏳ Downloading stream (may take 5-10 minutes for long videos)...")
         
         video_path = download_hls(url)
         
-        # Send video with progress updates
-        await msg.edit_text("✅ Download complete! Sending video...")
+        # Get video duration for Telegram
+        duration = 0
+        try:
+            probe = subprocess.run([
+                'ffprobe', '-v', 'error', '-show_entries', 
+                'format=duration', '-of', 
+                'default=noprint_wrappers=1:nokey=1', video_path
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            duration = int(float(probe.stdout.strip()))
+        except:
+            pass
+            
+        await status_msg.edit_text("📤 Uploading to Telegram...")
         with open(video_path, 'rb') as video_file:
             await update.message.reply_video(
                 video=video_file,
-                caption="Here's your downloaded video!",
+                caption="✅ Download complete!",
                 supports_streaming=True,
+                duration=duration,
                 width=1280,
-                height=720,
-                duration=60  # Approximate duration
+                height=720
             )
-        await msg.delete()
-            
+        await status_msg.delete()
+        
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-        print(f"Error: {str(e)}")
+        await update.message.reply_text(f"❌ Failed: {str(e)}")
+        if 'status_msg' in locals():
+            await status_msg.delete()
 
-def main() -> None:
-    # Check if ffmpeg is installed
+def main():
+    # Verify ffmpeg installation
     try:
-        subprocess.run(['ffmpeg', '-version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(['ffmpeg', '-version'], check=True, 
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except:
-        print("CRITICAL ERROR: ffmpeg is not installed. Please install it first.")
-        print("On Ubuntu/Debian: sudo apt install ffmpeg")
-        print("On CentOS/RHEL: sudo yum install ffmpeg")
-        print("On macOS: brew install ffmpeg")
+        print("Error: ffmpeg is not installed. Please install it first:")
+        print("Ubuntu/Debian: sudo apt install ffmpeg")
+        print("CentOS/RHEL: sudo yum install ffmpeg")
+        print("macOS: brew install ffmpeg")
         return
 
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.run_polling()
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
