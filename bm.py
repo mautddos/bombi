@@ -1,55 +1,112 @@
 import logging
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# List of video URLs
-VIDEOS = [
-    "https://t.me/botstomp/3?single",
-    "https://t.me/botstomp/3?single",
-    "https://t.me/botstomp/4?single",
-    "https://t.me/botstomp/5?single",
-    "https://t.me/botstomp/6?single",
-    "https://t.me/botstomp/7?single",
-    "https://t.me/botstomp/8?single",
-    "https://t.me/botstomp/9?single",
-    "https://t.me/botstomp/10?single"
-]
+# Configuration
+BOT_TOKEN = "8180063318:AAG2FtpVESnPYKuEszDIaewy-LXgVXXDS-o"
+CHANNEL_ID = -1002441094491  # Private channel ID (with -100 prefix)
+ADMIN_USER_IDS = [8167507955]  # Your user ID(s) who can control the bot
+
+# List of video message IDs from the channel
+VIDEO_MESSAGE_IDS = [8915, 8916, 8917]  # Example message IDs from your channel
+
+async def is_admin(update: Update) -> bool:
+    """Check if user is admin."""
+    return update.effective_user.id in ADMIN_USER_IDS
+
+async def post_init(application: Application) -> None:
+    """Post initialization - set bot commands."""
+    await application.bot.set_my_commands([
+        BotCommand("start", "Start the bot"),
+        BotCommand("sendvideos", "Send all videos from private channel"),
+        BotCommand("sendvideo", "Send specific video (usage: /sendvideo [id])")
+    ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
-    await update.message.reply_text("Hi! Use /sendvideos to send all the videos.")
+    """Send a welcome message."""
+    if not await is_admin(update):
+        await update.message.reply_text("⚠️ You are not authorized to use this bot.")
+        return
+    
+    commands = [
+        "/start - Show this message",
+        "/sendvideos - Send all videos from private channel",
+        "/sendvideo [id] - Send specific video by message ID",
+        "",
+        f"Channel ID: {CHANNEL_ID}",
+        "Example private link: https://t.me/c/2441094491/8915"
+    ]
+    
+    await update.message.reply_text("\n".join(commands))
 
 async def send_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send all videos from the list one by one."""
+    """Send all videos from the channel."""
+    if not await is_admin(update):
+        await update.message.reply_text("⚠️ You are not authorized to use this command.")
+        return
+    
     chat_id = update.effective_chat.id
-    await context.bot.send_message(chat_id, f"Sending {len(VIDEOS)} videos...")
+    bot = context.bot
     
-    for video_url in VIDEOS:
+    await update.message.reply_text(f"⏳ Preparing to send {len(VIDEO_MESSAGE_IDS)} videos...")
+    
+    success_count = 0
+    for msg_id in VIDEO_MESSAGE_IDS:
         try:
-            await context.bot.send_video(chat_id=chat_id, video=video_url)
+            # Copy the message instead of forwarding to preserve original sender
+            await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=CHANNEL_ID,
+                message_id=msg_id
+            )
+            success_count += 1
         except Exception as e:
-            logger.error(f"Failed to send video {video_url}: {e}")
-            await context.bot.send_message(chat_id, f"Failed to send video: {video_url}")
+            logger.error(f"Failed to send video {msg_id}: {e}")
+            await update.message.reply_text(f"❌ Failed to send video ID {msg_id}")
     
-    await context.bot.send_message(chat_id, "All videos sent!")
+    await update.message.reply_text(f"✅ Done! Successfully sent {success_count}/{len(VIDEO_MESSAGE_IDS)} videos")
+
+async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send specific video by message ID."""
+    if not await is_admin(update):
+        await update.message.reply_text("⚠️ You are not authorized to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("ℹ️ Usage: /sendvideo [message_id]\nExample: /sendvideo 8915")
+        return
+    
+    try:
+        msg_id = int(context.args[0])
+        await context.bot.copy_message(
+            chat_id=update.effective_chat.id,
+            from_chat_id=CHANNEL_ID,
+            message_id=msg_id
+        )
+    except ValueError:
+        await update.message.reply_text("❌ Invalid message ID. Please provide a number.")
+    except Exception as e:
+        logger.error(f"Failed to send video {msg_id}: {e}")
+        await update.message.reply_text(f"❌ Failed to send video ID {msg_id}")
 
 def main() -> None:
     """Start the bot."""
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token("8180063318:AAG2FtpVESnPYKuEszDIaewy-LXgVXXDS-o").build()
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # on different commands - answer in Telegram
+    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("sendvideos", send_videos))
+    application.add_handler(CommandHandler("sendvideo", send_video))
 
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Run the bot
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
