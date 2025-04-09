@@ -19,6 +19,7 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
 
+loop = asyncio.get_event_loop()
 executor = ThreadPoolExecutor()
 video_data_cache = {}
 
@@ -161,12 +162,12 @@ def handle_quality(call):
         return
 
     bot.edit_message_reply_markup(user_id, call.message.message_id)
-    executor.submit(lambda: asyncio.run(process_video(call.message, selected.get("url"), quality, selected.get("thumbnail"))))
+    loop.create_task(process_video(call.message, selected.get("url"), quality, selected.get("thumbnail")))
 
-async def start_client():
+async def main():
     await client.start(bot_token=BOT_TOKEN)
+    print("🚀 Bot running with streaming, thumbnail fallback, and 20 screenshots...")
+    bot.polling(non_stop=True)
 
 if __name__ == "__main__":
-    asyncio.run(start_client())
-    print("🚀 Bot running with streaming, thumbnail fallback, and 20 screenshots...")
-    bot.polling()
+    loop.run_until_complete(main())
