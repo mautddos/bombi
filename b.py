@@ -19,22 +19,23 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
 
-# Start Telethon client
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(client.start())
-print("✅ Telethon client connected!")
+# Async function to start Telethon client as bot
+async def start_telethon():
+    await client.start(bot_token=BOT_TOKEN)
+    print("✅ Telethon client connected!")
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start_telethon())
 
 executor = ThreadPoolExecutor(max_workers=4)
-
-video_data_cache = {}  # Store download links per message/user
+video_data_cache = {}  # Store per-user quality options
 
 # Extract slug
 def extract_slug(url):
     match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
     return match.group(1) if match else None
 
-# Fetch video qualities
+# Get video options
 def get_video_options(xh_url):
     slug = extract_slug(xh_url)
     if not slug:
@@ -46,6 +47,7 @@ def get_video_options(xh_url):
     try:
         res = requests.get(api_url)
         data = res.json().get("data", {})
+        title = data.get("title", "xHamster Video")
         thumbnail = data.get("thumbnail", "")
         downloads = data.get("downloads", [])
 
@@ -54,8 +56,7 @@ def get_video_options(xh_url):
             key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
             reverse=True
         )
-
-        return data.get("title", "xHamster Video"), thumbnail, options
+        return title, thumbnail, options
     except Exception as e:
         print("API error:", e)
         return None, None, []
@@ -100,7 +101,6 @@ def handle_link(msg):
         bot.send_message(msg.chat.id, "❌ No video qualities found.")
         return
 
-    # Cache video options
     video_data_cache[msg.chat.id] = {
         "options": options,
         "title": title
@@ -129,7 +129,6 @@ def handle_quality_choice(call):
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     bot.send_message(call.message.chat.id, f"📥 Preparing {quality} download...")
 
-    # Run async download/upload
     executor.submit(lambda: loop.run_until_complete(
         process_video_quality(call.message, video_url, quality)
     ))
