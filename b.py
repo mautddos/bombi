@@ -52,11 +52,9 @@ async def process_queue():
         if task_queue and len(current_tasks) < MAX_PARALLEL_DOWNLOADS:
             chat_id, task_func, quality = task_queue.popleft()
             
-            # If user already has a download in progress, put it back in queue
             if chat_id in current_tasks:
                 task_queue.appendleft((chat_id, task_func, quality))
             else:
-                # Update user status
                 user_status[chat_id] = {
                     'status': 'downloading',
                     'quality': quality,
@@ -66,14 +64,12 @@ async def process_queue():
                 task = asyncio.create_task(task_func())
                 current_tasks[chat_id] = task
                 
-                # Add callback to clean up after task completes
                 def cleanup(future, cid=chat_id):
                     current_tasks.pop(cid, None)
                     user_status.pop(cid, None)
                 
                 task.add_done_callback(cleanup)
                 
-                # Notify user their download is starting
                 try:
                     await bot.send_message(chat_id, f"🚀 Starting your {quality} download now!")
                 except:
@@ -81,15 +77,12 @@ async def process_queue():
         
         await asyncio.sleep(1)
 
-# Start queue processor when bot starts
 loop.create_task(process_queue())
 
-# Extract slug
 def extract_slug(url):
     match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
     return match.group(1) if match else None
 
-# Get video options
 def get_video_options(xh_url):
     slug = extract_slug(xh_url)
     if not slug:
@@ -115,21 +108,16 @@ def get_video_options(xh_url):
         print("API error:", e)
         return None, None, []
 
-# Generate screenshots from video
 async def generate_screenshots(video_path, chat_id):
     try:
-        # Create screenshots directory
         screenshot_dir = f"screenshots_{chat_id}"
         os.makedirs(screenshot_dir, exist_ok=True)
         
-        # Get video duration
         cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {video_path}"
         duration = float(subprocess.check_output(cmd, shell=True).decode('utf-8').strip())
         
-        # Calculate screenshot intervals (20 screenshots)
         intervals = [i * (duration / 20) for i in range(1, 21)]
         
-        # Generate screenshots with proper pixel format
         for i, interval in enumerate(intervals):
             output_path = f"{screenshot_dir}/screenshot_{i+1}.jpg"
             cmd = (
@@ -139,7 +127,6 @@ async def generate_screenshots(video_path, chat_id):
             )
             subprocess.run(cmd, shell=True, check=True, stderr=subprocess.DEVNULL)
             
-            # Optimize image if it exists
             if os.path.exists(output_path):
                 with Image.open(output_path) as img:
                     img.save(output_path, "JPEG", quality=85)
@@ -151,7 +138,6 @@ async def generate_screenshots(video_path, chat_id):
         print("Screenshot generation error:", e)
         return None
 
-# Async downloader
 async def download_video_async(video_url, file_name):
     try:
         async with aiohttp.ClientSession() as session:
@@ -165,7 +151,6 @@ async def download_video_async(video_url, file_name):
         print("Download error:", e)
     return False
 
-# Async handler
 async def process_video_quality(message, video_url, quality_label):
     chat_id = message.chat.id
     file_name = f"xh_{chat_id}.mp4"
@@ -178,19 +163,16 @@ async def process_video_quality(message, video_url, quality_label):
             await bot.edit_message_text("❌ Download failed.", chat_id, downloading_msg.message_id)
             return
 
-        # Generate and send screenshots
         screenshot_msg = await bot.send_message(chat_id, "📸 Generating screenshots...")
         screenshot_dir = await generate_screenshots(file_name, chat_id)
         
         if screenshot_dir:
             await bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
             try:
-                # Send screenshots as album
                 screenshot_files = sorted(
                     [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
                     key=lambda x: int(x.split('_')[1].split('.')[0])
                 
-                # Split into chunks of 10 to avoid flooding
                 for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                     media = []
                     for i, screenshot in enumerate(chunk):
@@ -201,14 +183,12 @@ async def process_video_quality(message, video_url, quality_label):
                     
                     await bot.send_media_group(chat_id, media)
                 
-                # Clean up screenshots
                 for f in os.listdir(screenshot_dir):
                     os.remove(f"{screenshot_dir}/{f}")
                 os.rmdir(screenshot_dir)
             except Exception as e:
                 print("Screenshot upload error:", e)
         
-        # Upload video
         await bot.edit_message_text("✅ Uploading to Telegram...", chat_id, downloading_msg.message_id)
         try:
             await client.send_file(
@@ -226,23 +206,18 @@ async def process_video_quality(message, video_url, quality_label):
         print("Error in video processing:", e)
         await bot.send_message(chat_id, "❌ An error occurred during processing.")
 
-# Status command with queue information
 @bot.message_handler(commands=['status'])
 def status_command(message):
-    # System stats
     cpu_usage = psutil.cpu_percent()
     memory_usage = psutil.virtual_memory().percent
     disk_usage = psutil.disk_usage('/').percent
     
-    # Bot stats
     uptime_seconds = time.time() - BOT_START_TIME
     uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))
     
-    # Queue information
     active_downloads = len(current_tasks)
     queued_downloads = len(task_queue)
     
-    # Create status message
     status_msg = f"""
 🤖 *Bot Status Report* 🤖
 
@@ -266,23 +241,16 @@ def status_command(message):
 """
     bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
 
-# Queue position command
 @bot.message_handler(commands=['queue'])
 def queue_command(message):
     chat_id = message.chat.id
     
-    # Check if user has any active or queued downloads
-    active_position = None
-    queue_position = None
-    
-    # Check if currently downloading
     if chat_id in current_tasks:
         status = user_status.get(chat_id, {})
         elapsed = int(time.time() - status.get('start_time', time.time()))
         bot.send_message(chat_id, f"🔍 Your {status.get('quality', '')} download is currently processing ({elapsed}s elapsed)")
         return
     
-    # Check queue position
     queue_list = [t[0] for t in task_queue]
     if chat_id in queue_list:
         position = queue_list.index(chat_id) + 1
@@ -290,7 +258,6 @@ def queue_command(message):
     else:
         bot.send_message(chat_id, "ℹ️ You don't have any downloads in queue")
 
-# Cancel command
 @bot.message_handler(commands=['cancel'])
 def cancel_command(message):
     chat_id = message.chat.id
@@ -299,13 +266,11 @@ def cancel_command(message):
         current_tasks[chat_id].cancel()
         bot.send_message(chat_id, "❌ Your current download has been cancelled")
     elif any(t[0] == chat_id for t in task_queue):
-        # Remove all queued tasks for this user
         task_queue = deque(t for t in task_queue if t[0] != chat_id)
         bot.send_message(chat_id, "❌ Your queued download has been removed")
     else:
         bot.send_message(chat_id, "ℹ️ You don't have any active or queued downloads")
 
-# Start command
 @bot.message_handler(commands=['start'])
 def start_command(message):
     start_msg = """
@@ -333,10 +298,8 @@ Send me a xHamster video link and I'll download it for you with multiple quality
 """
     bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
 
-# Handle video link
 @bot.message_handler(func=lambda msg: msg.text.startswith("http"))
 def handle_link(msg):
-    # Check if user already has active download
     if msg.chat.id in current_tasks:
         bot.send_message(msg.chat.id, "⚠️ You already have a download in progress. Use /cancel if you want to stop it.")
         return
@@ -372,7 +335,6 @@ def handle_link(msg):
     
     bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
 
-# Handle button click
 @bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
 def handle_quality_choice(call):
     quality = call.data.split("q:")[1]
@@ -387,11 +349,9 @@ def handle_quality_choice(call):
     video_url = selected.get("url")
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     
-    # Add cancel button
     cancel_markup = InlineKeyboardMarkup()
     cancel_markup.add(InlineKeyboardButton("❌ Cancel Download", callback_data=f"cancel:{user_id}"))
     
-    # Get queue position
     queue_pos = sum(1 for t in task_queue if t[0] == user_id) + 1
     if queue_pos > 1:
         queue_info = f" (Position in queue: {queue_pos})"
@@ -404,14 +364,12 @@ def handle_quality_choice(call):
         reply_markup=cancel_markup
     )
 
-    # Add task to queue
     task_queue.append((
         user_id,
         lambda: process_video_quality(call.message, video_url, quality),
         quality
     ))
 
-# Handle cancel button
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel:"))
 def handle_cancel_button(call):
     user_id = int(call.data.split(":")[1])
@@ -421,7 +379,6 @@ def handle_cancel_button(call):
         bot.answer_callback_query(call.id, "Download cancelled")
         bot.send_message(user_id, "❌ Your download has been cancelled")
     elif any(t[0] == user_id for t in task_queue):
-        # Remove all queued tasks for this user
         global task_queue
         task_queue = deque(t for t in task_queue if t[0] != user_id)
         bot.answer_callback_query(call.id, "Queued download removed")
@@ -429,11 +386,9 @@ def handle_cancel_button(call):
     else:
         bot.answer_callback_query(call.id, "No download to cancel")
 
-# Error handler
 @bot.message_handler(func=lambda msg: True)
 def handle_other_messages(msg):
     bot.send_message(msg.chat.id, "Please send a valid xHamster video URL or use /start to see options.")
 
-# Start bot
 print("🚀 Advanced XHamster Downloader Bot is running with queue system...")
 bot.polling(none_stop=True, interval=0)
