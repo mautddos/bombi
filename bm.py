@@ -3,7 +3,8 @@ import os
 import asyncio
 import tempfile
 import subprocess
-from telegram import Update
+import math
+from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -11,8 +12,9 @@ from bson.objectid import ObjectId
 # Configuration
 TOKEN = "7822455054:AAF-C_XdQBIAAWEXYDqQ2lrsIf1ewmDa46s"
 MONGO_URI = "mongodb+srv://zqffpg:1HKKatlqTOBcOwa6@cluster0.7dwrm.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-HLS_URL = "https://video-cf.xhcdn.com/8yE%2BseHYuE%2B6V0skGFlDrvM8w2V1Xg3Wy4L98rG6%2Bs0%3D/56/1744113600/media=hls4/multi=256x144:144p,426x240:240p/017/235/029/240p.h264.mp4.m3u8"
-MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
+HLS_URL = "your_hls_url"
+MAX_DOCUMENT_SIZE = 2000 * 1024 * 1024  # 2GB Telegram document limit
+CHUNK_SIZE = 45 * 1024 * 1024  # 45MB chunks (under 50MB limit)
 
 # Setup logging
 logging.basicConfig(
@@ -27,147 +29,122 @@ db = client.video_bot
 requests_collection = db.requests
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a welcome message when the command /start is issued."""
     await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message to get the video.')
 
-async def download_original_video(input_url: str, output_path: str):
-    """Download the original video without re-encoding."""
+async def download_video(input_url: str, output_path: str):
+    """Download video with progress tracking"""
     command = [
         'ffmpeg',
         '-i', input_url,
-        '-c', 'copy',  # No re-encoding to preserve quality
+        '-c', 'copy',
         '-f', 'mp4',
         output_path
     ]
     subprocess.run(command, check=True)
 
-async def create_streamable_version(input_path: str, output_path: str):
-    """Create a streamable version of the video."""
+async def split_large_file(file_path: str, chunk_size: int):
+    """Split large file into chunks"""
+    chunk_dir = tempfile.mkdtemp()
+    base_name = os.path.basename(file_path)
+    chunk_pattern = os.path.join(chunk_dir, f"part_%03d_{base_name}")
+    
     command = [
-        'ffmpeg',
-        '-i', input_path,
-        '-c:v', 'libx264', '-preset', 'fast',
-        '-crf', '23',  # Balanced quality/size
-        '-movflags', '+faststart',  # Enable streaming
-        '-f', 'mp4',
-        output_path
+        'split',
+        '--bytes=' + str(chunk_size),
+        '--numeric-suffixes',
+        '--suffix-length=3',
+        file_path,
+        chunk_pattern
     ]
     subprocess.run(command, check=True)
+    
+    chunks = sorted([
+        os.path.join(chunk_dir, f) 
+        for f in os.listdir(chunk_dir) 
+        if f.startswith('part_')
+    ])
+    return chunks
 
-async def send_video_package(update: Update, original_path: str, streamable_path: str):
-    """Send both original and streamable versions to the user."""
-    # Send original as document (no size limit)
-    try:
-        with open(original_path, 'rb') as original_file:
+async def send_large_document(update: Update, file_path: str):
+    """Send large document in chunks if needed"""
+    file_size = os.path.getsize(file_path)
+    
+    if file_size <= CHUNK_SIZE:
+        # Send as single document if small enough
+        with open(file_path, 'rb') as f:
             await update.message.reply_document(
-                document=original_file,
-                caption="Original quality video (as document)"
+                document=InputFile(f, filename=os.path.basename(file_path)),
+                caption="Full video"
             )
-    except Exception as e:
-        logger.error(f"Error sending original: {e}")
-        raise
-
-    # Check if streamable version exists and is under size limit
-    if os.path.exists(streamable_path):
-        streamable_size = os.path.getsize(streamable_path)
-        if streamable_size < MAX_VIDEO_SIZE:
-            try:
-                with open(streamable_path, 'rb') as streamable_file:
-                    await update.message.reply_video(
-                        video=streamable_file,
-                        caption="Streamable version",
-                        supports_streaming=True
-                    )
-            except Exception as e:
-                logger.error(f"Error sending streamable version: {e}")
-                await update.message.reply_text(
-                    "⚠️ Couldn't send streamable version, but original was sent successfully."
+    else:
+        # Split and send chunks
+        chunks = await split_large_file(file_path, CHUNK_SIZE)
+        total_chunks = len(chunks)
+        
+        for i, chunk_path in enumerate(chunks, 1):
+            with open(chunk_path, 'rb') as f:
+                await update.message.reply_document(
+                    document=InputFile(f, filename=f"part_{i:03d}_of_{total_chunks}"),
+                    caption=f"Part {i} of {total_chunks}"
                 )
-        else:
-            await update.message.reply_text(
-                "ℹ️ Streamable version exceeds 50MB limit\n"
-                "Download the original document for full quality"
-            )
-
-async def track_progress(update: Update, request_id: ObjectId, message: str):
-    """Update user on progress and log to MongoDB."""
-    await update.message.reply_text(message)
-    requests_collection.update_one(
-        {'_id': request_id},
-        {'$set': {'progress': message}}
-    )
-
-async def cleanup_files(*files):
-    """Clean up temporary files."""
-    for file_path in files:
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                logger.error(f"Error cleaning up file {file_path}: {e}")
+            os.remove(chunk_path)
+        
+        # Clean up empty directory
+        os.rmdir(os.path.dirname(chunks[0]))
 
 async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main function to handle video processing and sending."""
-    original_path = None
-    streamable_path = None
-    temp_dir = None
-    
+    temp_file = None
     try:
         # Create request record
         request_id = requests_collection.insert_one({
             'user_id': update.message.from_user.id,
-            'status': 'processing',
-            'progress': 'starting'
+            'status': 'processing'
         }).inserted_id
 
-        # Create temporary directory
-        temp_dir = tempfile.mkdtemp()
-        original_path = os.path.join(temp_dir, "original.mp4")
-        streamable_path = os.path.join(temp_dir, "streamable.mp4")
-
-        # Step 1: Download original
-        await track_progress(update, request_id, "⬇️ Downloading original video...")
-        await download_original_video(HLS_URL, original_path)
-
-        # Step 2: Create streamable version
-        await track_progress(update, request_id, "🔄 Creating streamable version...")
-        await create_streamable_version(original_path, streamable_path)
-
-        # Step 3: Send both versions
-        await track_progress(update, request_id, "📤 Sending video package...")
-        await send_video_package(update, original_path, streamable_path)
-
+        await update.message.reply_text("⬇️ Downloading video...")
+        
+        # Create temp file
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+            temp_file = tmp_file.name
+        
+        # Download original
+        await download_video(HLS_URL, temp_file)
+        
+        # Check file size
+        file_size = os.path.getsize(temp_file)
+        await update.message.reply_text(f"📦 File size: {file_size/1024/1024:.2f}MB")
+        
+        if file_size > MAX_DOCUMENT_SIZE:
+            await update.message.reply_text("❌ File too large (over 2GB). Cannot send.")
+            return
+        
+        # Send as document
+        await update.message.reply_text("📤 Uploading to Telegram...")
+        await send_large_document(update, temp_file)
+        
         # Update status
         requests_collection.update_one(
             {'_id': request_id},
-            {'$set': {'status': 'completed'}}
+            {'$set': {'status': 'completed', 'size': file_size}}
         )
-
+        
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg processing error: {e}")
+        logger.error(f"FFmpeg error: {e}")
         await update.message.reply_text("❌ Video processing failed. Please try again.")
-        requests_collection.update_one(
-            {'_id': request_id},
-            {'$set': {'status': 'failed', 'error': str(e)}}
-        )
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         await update.message.reply_text("❌ Something went wrong. Please try again later.")
-        requests_collection.update_one(
-            {'_id': request_id},
-            {'$set': {'status': 'failed', 'error': str(e)}}
-        )
     finally:
-        # Clean up files
-        if temp_dir:
-            await cleanup_files(original_path, streamable_path)
-            try:
-                os.rmdir(temp_dir)
-            except Exception as e:
-                logger.error(f"Error removing temp directory: {e}")
+        # Clean up
+        if temp_file and os.path.exists(temp_file):
+            os.remove(temp_file)
+        if 'request_id' in locals():
+            requests_collection.update_one(
+                {'_id': request_id},
+                {'$set': {'status': 'failed' if 'e' in locals() else 'completed'}}
+            )
 
 def main():
-    """Start the bot."""
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, send_video))
