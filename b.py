@@ -1,4 +1,3 @@
-
 import os
 import re
 import urllib.parse
@@ -19,10 +18,6 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
-
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(client.start(bot_token=BOT_TOKEN))
 
 executor = ThreadPoolExecutor()
 video_data_cache = {}
@@ -166,9 +161,12 @@ def handle_quality(call):
         return
 
     bot.edit_message_reply_markup(user_id, call.message.message_id)
-    executor.submit(lambda: loop.run_until_complete(
-        process_video(call.message, selected.get("url"), quality, selected.get("thumbnail"))
-    ))
+    executor.submit(lambda: asyncio.run(process_video(call.message, selected.get("url"), quality, selected.get("thumbnail"))))
 
-print("🚀 Bot running with streaming, thumbnail fallback, and 20 screenshots...")
-bot.polling()
+async def start_client():
+    await client.start(bot_token=BOT_TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(start_client())
+    print("🚀 Bot running with streaming, thumbnail fallback, and 20 screenshots...")
+    bot.polling()
