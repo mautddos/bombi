@@ -1,6 +1,10 @@
 import logging
+import os
+import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import subprocess
+import tempfile
 
 # Enable logging
 logging.basicConfig(
@@ -9,26 +13,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Your bot token (I see you shared it in your message)
+# Your bot token (consider using environment variables for security)
 TOKEN = "7822455054:AAF-C_XdQBIAAWEXYDqQ2lrsIf1ewmDa46s"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
-    await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message and I will send you the video.')
+    await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message and I will process and send you the video.')
 
 async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the video when user sends any message."""
+    """Process and send the video when user sends any message."""
     try:
-        # Try with a direct video URL first (you'll need to replace this)
-        video_url = "https://example.com/direct-video.mp4"  # Replace with actual direct video URL
-        await update.message.reply_video(video_url)
+        # Inform user we're processing
+        await update.message.reply_text("Processing your video, please wait...")
         
-        # Alternative: Send as document if video doesn't work
-        # await update.message.reply_document(video_url)
-        
+        # Create temporary directory
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hls_url = "https://video-cf.xhcdn.com/8yE%2BseHYuE%2B6V0skGFlDrvM8w2V1Xg3Wy4L98rG6%2Bs0%3D/56/1744113600/media=hls4/multi=256x144:144p,426x240:240p/017/235/029/240p.h264.mp4.m3u8"
+            output_file = os.path.join(tmp_dir, "output.mp4")
+            
+            # Download and convert using ffmpeg
+            command = [
+                'ffmpeg',
+                '-i', hls_url,
+                '-c', 'copy',
+                '-f', 'mp4',
+                output_file
+            ]
+            
+            # Run ffmpeg command
+            subprocess.run(command, check=True)
+            
+            # Send the converted video
+            with open(output_file, 'rb') as video_file:
+                await update.message.reply_video(video=video_file)
+                
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg error: {e}")
+        await update.message.reply_text("Error processing video stream. Please try again later.")
     except Exception as e:
-        logger.error(f"Error sending video: {e}")
-        await update.message.reply_text("Sorry, I couldn't send the video. Please try again later.")
+        logger.error(f"Error: {e}")
+        await update.message.reply_text("Sorry, I couldn't process and send the video. Please try again later.")
 
 def main():
     """Start the bot."""
