@@ -4,7 +4,8 @@ import requests
 import urllib.parse
 import telebot
 import asyncio
-from telethon import TelegramClient, events
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 # Telegram credentials
 BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
@@ -12,16 +13,16 @@ API_ID = 22625636  # integer
 API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
 bot = telebot.TeleBot(BOT_TOKEN)
-client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
+client = TelegramClient(StringSession(), API_ID, API_HASH)  # Using StringSession for persistence
 
-# Start the Telethon client when the script starts
-async def start_telethon_client():
+# Start Telethon client in the background
+async def start_client():
     await client.start()
-    print("Telethon client started")
+    print("✅ Telethon client connected successfully!")
 
-# Run the Telethon client in the background
-loop = asyncio.get_event_loop()
-loop.create_task(start_telethon_client())
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(start_client())
 
 # Helper to extract slug
 def extract_slug(url):
@@ -70,28 +71,31 @@ def handle_message(message):
 
     file_name = "video.mp4"
     try:
+        # Download video
         r = requests.get(video_url, stream=True)
         with open(file_name, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # Use the existing event loop to send the video
-        loop.run_until_complete(send_video(message.chat.id, file_name))
+        # Send video using Telethon (ensure client is connected)
+        async def send_video_async():
+            try:
+                if not client.is_connected():
+                    await client.connect()
+                await client.send_file(
+                    entity=message.chat.id,
+                    file=file_name,
+                    caption="🎥 Here's your xHamster video."
+                )
+            except Exception as e:
+                print(f"Error sending video: {e}")
+                bot.send_message(message.chat.id, f"❌ Failed to send video: {e}")
+
+        loop.run_until_complete(send_video_async())
         os.remove(file_name)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Failed to send video. {e}")
-
-# Async function to send video
-async def send_video(chat_id, file_path):
-    try:
-        await client.send_file(
-            entity=chat_id, 
-            file=file_path, 
-            caption="🎥 Here's your xHamster video."
-        )
-    except Exception as e:
-        print(f"Error sending video: {e}")
+        bot.send_message(message.chat.id, f"❌ Failed to process video: {e}")
 
 # Start polling
 print("Bot is running...")
