@@ -19,7 +19,7 @@ import subprocess
 from PIL import Image
 
 # Telegram credentials
-BOT_TOKEN ="8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
 API_ID = 22625636
 API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
