@@ -5,10 +5,9 @@ import urllib.parse
 import telebot
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.types import InputWebDocument
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional, List
 
 # Configuration
 BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
@@ -71,56 +70,66 @@ def get_video_info(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
         print(f"API Error for {url}: {e}")
         return None, None, None
 
-def download_file(url: str, file_path: str) -> bool:
+def download_with_progress(url: str, file_path: str, chat_id: int, is_thumbnail: bool = False) -> bool:
     """Download file with progress tracking."""
     try:
+        file_type = "thumbnail" if is_thumbnail else "video"
+        bot.send_message(chat_id, f"⬇️ Downloading {file_type}...")
+        
         with requests.get(url, stream=True, timeout=30) as r:
             r.raise_for_status()
             total_size = int(r.headers.get('content-length', 0))
             
-            if total_size > MAX_FILE_SIZE:
+            if total_size > MAX_FILE_SIZE and not is_thumbnail:
                 print(f"File too large: {total_size} bytes")
                 return False
                 
+            downloaded = 0
             with open(file_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        if not is_thumbnail and total_size > 0:
+                            percent = int(100 * downloaded / total_size)
+                            if percent % 10 == 0:  # Update every 10%
+                                bot.send_chat_action(chat_id, 'upload_video')
         return True
     except Exception as e:
         print(f"Download failed for {url}: {e}")
         return False
 
-async def send_video(chat_id: int, file_path: str, thumb_url: str, caption: str):
+async def send_video_with_thumbnail(chat_id: int, video_path: str, thumb_path: str, title: str):
     """Send video with thumbnail using Telethon."""
     try:
-        # Download thumbnail if available
-        thumb_path = None
-        if thumb_url:
-            thumb_path = f"thumb_{chat_id}.jpg"
-            if not download_file(thumb_url, thumb_path):
-                thumb_path = None
-
+        # Ensure thumbnail exists
+        if not os.path.exists(thumb_path):
+            # If no thumbnail, create a black placeholder
+            from PIL import Image
+            img = Image.new('RGB', (1280, 720), color='black')
+            thumb_path = f"placeholder_{chat_id}.jpg"
+            img.save(thumb_path)
+        
+        bot.send_message(chat_id, "📤 Uploading video with thumbnail...")
+        
         await client.send_file(
             entity=chat_id,
-            file=file_path,
+            file=video_path,
             thumb=thumb_path,
-            caption=caption,
+            caption=f"🎥 {title}",
             supports_streaming=True,
             attributes=None,
             progress_callback=lambda c, t: print(f"Uploaded {c} of {t} bytes")
         )
         
-        # Clean up
-        if thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
-            
     except Exception as e:
         print(f"Error sending video to {chat_id}: {e}")
         raise
     finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        # Clean up files
+        for file_path in [video_path, thumb_path]:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
 
 def process_single_url(url: str, chat_id: int):
     """Process a single xHamster URL."""
@@ -132,16 +141,27 @@ def process_single_url(url: str, chat_id: int):
             bot.send_message(chat_id, f"❌ Could not process: {url}")
             return
             
-        file_path = f"video_{chat_id}.mp4"
-        bot.send_message(chat_id, f"⏳ Downloading: {title}...")
+        # Create unique filenames
+        base_name = f"xhamster_{chat_id}_{os.getpid()}"
+        video_path = f"{base_name}.mp4"
+        thumb_path = f"{base_name}_thumb.jpg"
         
-        if not download_file(video_url, file_path):
+        # Download thumbnail first
+        if thumb_url:
+            if not download_with_progress(thumb_url, thumb_path, chat_id, is_thumbnail=True):
+                thumb_path = None
+        else:
+            thumb_path = None
+            
+        # Download video
+        bot.send_message(chat_id, f"⏳ Downloading: {title}...")
+        if not download_with_progress(video_url, video_path, chat_id):
             bot.send_message(chat_id, f"❌ Download failed: {url}")
             return
             
-        bot.send_message(chat_id, f"📤 Uploading: {title}...")
+        # Upload with thumbnail
         loop.run_until_complete(
-            send_video(chat_id, file_path, thumb_url, f"🎥 {title}")
+            send_video_with_thumbnail(chat_id, video_path, thumb_path or "", title)
         )
         
     except Exception as e:
@@ -181,5 +201,5 @@ def handle_message(message):
             continue
 
 if __name__ == "__main__":
-    print("Bot is running...")
+    print("Bot is running with thumbnail support...")
     bot.infinity_polling()
