@@ -17,7 +17,7 @@ import subprocess
 from PIL import Image
 
 # Telegram credentials
-BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+BOT_TOKEN = "7602913380:AAFF3gJ1f4aCw1k2nhdKAoMquj3aSIDiPXk"
 API_ID = 22625636
 API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
@@ -167,7 +167,7 @@ async def process_video_quality(message, video_url, quality_label):
         await client.send_file(
             chat_id, 
             file=file_name, 
-            caption=f"🎥 Your {quality_label} video.\n⚡ @XHamsterDownloaderBot",
+            caption=f"🎥 Your {quality_label} video.\n⚡ @semxi_suxbot",
             supports_streaming=True
         )
         if os.path.exists(file_name):
