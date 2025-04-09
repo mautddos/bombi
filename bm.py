@@ -65,14 +65,13 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Start progress tracking
             progress_task = asyncio.create_task(
                 track_progress(update, output_file, request_id)
+            )
             
             # Convert using ffmpeg with optimized settings
             command = [
                 'ffmpeg',
                 '-i', HLS_URL,
-                '-c:v', 'libx264', '-preset', 'fast',
-                '-crf', '28',  # Better compression
-                '-movflags', 'frag_keyframe+empty_moov',
+                '-c', 'copy',  # Direct stream copy without re-encoding
                 '-f', 'mp4',
                 output_file
             ]
@@ -83,16 +82,13 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Stop progress tracking
             progress_task.cancel()
             
-            # Send video in chunks if too large
-            max_size = 50 * 1024 * 1024  # 50MB Telegram limit
-            file_size = os.path.getsize(output_file)
-            
-            if file_size > max_size:
-                await update.message.reply_text("📦 Video is large, sending in parts...")
-                await send_large_video(update, output_file)
-            else:
-                with open(output_file, 'rb') as video_file:
-                    await update.message.reply_video(video=video_file)
+            # Send the video
+            with open(output_file, 'rb') as video_file:
+                await update.message.reply_video(
+                    video=video_file,
+                    supports_streaming=True,
+                    caption="Here's your video!"
+                )
             
             requests_collection.update_one(
                 {'_id': request_id},
@@ -106,37 +102,6 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {'$set': {'status': 'failed', 'error': str(e)}}
         )
         await update.message.reply_text("❌ Error processing video. Please try again later.")
-
-async def send_large_video(update: Update, file_path: str):
-    """Split and send large video in parts"""
-    try:
-        # Split video using ffmpeg
-        split_dir = tempfile.mkdtemp()
-        split_command = [
-            'ffmpeg',
-            '-i', file_path,
-            '-c', 'copy',
-            '-f', 'segment',
-            '-segment_time', '300',  # 5 minute chunks
-            '-reset_timestamps', '1',
-            os.path.join(split_dir, 'part%03d.mp4')
-        ]
-        subprocess.run(split_command, check=True)
-        
-        # Send each part
-        parts = sorted([f for f in os.listdir(split_dir) if f.startswith('part')])
-        for part in parts:
-            part_path = os.path.join(split_dir, part)
-            with open(part_path, 'rb') as f:
-                await update.message.reply_video(
-                    video=f,
-                    caption=f"Part {parts.index(part)+1} of {len(parts)}"
-                )
-            os.remove(part_path)
-            
-    except Exception as e:
-        logger.error(f"Error sending large video: {e}")
-        raise
 
 def main():
     application = Application.builder().token(TOKEN).build()
