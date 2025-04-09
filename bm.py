@@ -166,24 +166,20 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 def main():
-    # Create application with API credentials
+    # Create application with timeout settings
     application = Application.builder() \
         .token(TOKEN) \
-        .base_url("https://api.telegram.org") \
-        .base_file_url("https://api.telegram.org/file") \
+        .read_timeout(60) \
+        .write_timeout(60) \
+        .connect_timeout(60) \
+        .pool_timeout(60) \
         .build()
         
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, send_video))
     
-    # Run with more aggressive timeout settings
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        read_timeout=60,
-        write_timeout=60,
-        connect_timeout=60,
-        pool_timeout=60
-    )
+    # Run the bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
