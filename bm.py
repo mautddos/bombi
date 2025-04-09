@@ -29,49 +29,67 @@ requests_collection = db.requests
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message to get the video.')
 
-async def convert_video(input_url: str, output_path: str):
-    """Convert HLS to MP4 with optimized settings"""
+async def download_original(input_url: str, output_path: str):
+    """Download original video without re-encoding"""
     command = [
         'ffmpeg',
         '-i', input_url,
-        '-c:v', 'libx264', '-preset', 'fast',
-        '-crf', '23',  # Balanced quality/size
-        '-movflags', '+faststart',
-        '-vf', 'scale=640:-2',  # Resize to 640 width
+        '-c', 'copy',  # No re-encoding
         '-f', 'mp4',
         output_path
     ]
     subprocess.run(command, check=True)
 
-async def split_video(input_path: str, output_dir: str, segment_time: int = 300):
-    """Split video into smaller chunks"""
+async def create_streamable_version(input_path: str, output_path: str):
+    """Create optimized version for streaming"""
     command = [
         'ffmpeg',
         '-i', input_path,
-        '-c', 'copy',
-        '-f', 'segment',
-        '-segment_time', str(segment_time),
-        '-reset_timestamps', '1',
-        os.path.join(output_dir, 'part_%03d.mp4')
+        '-c:v', 'libx264', '-preset', 'fast',
+        '-crf', '23',
+        '-movflags', '+faststart',
+        '-vf', 'scale=640:-2',
+        '-f', 'mp4',
+        output_path
     ]
     subprocess.run(command, check=True)
-    return sorted([f for f in os.listdir(output_dir) if f.startswith('part_')])
 
-async def send_video_chunks(update: Update, chunks: list, chunk_dir: str):
-    """Send video chunks to user"""
-    for i, chunk in enumerate(chunks, 1):
-        chunk_path = os.path.join(chunk_dir, chunk)
-        try:
-            with open(chunk_path, 'rb') as f:
-                await update.message.reply_video(
-                    video=f,
-                    caption=f"Part {i} of {len(chunks)}",
-                    supports_streaming=True
-                )
-            os.remove(chunk_path)
-        except Exception as e:
-            logger.error(f"Error sending chunk {i}: {e}")
-            raise
+async def send_video_package(update: Update, original_path: str, streamable_path: str):
+    """Send both original and streamable versions"""
+    # Send original as document (no size limit)
+    with open(original_path, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            caption="Original quality (as document)"
+        )
+    
+    # Send streamable version if under size limit
+    streamable_size = os.path.getsize(streamable_path)
+    if streamable_size < MAX_VIDEO_SIZE:
+        with open(streamable_path, 'rb') as f:
+            await update.message.reply_video(
+                video=f,
+                caption="Streamable version",
+                supports_streaming=True
+            )
+    else:
+        await update.message.reply_text(
+            "ℹ️ Streamable version exceeds 50MB limit\n"
+            "Download the original document for full quality"
+        )
+
+async def track_progress(update: Update, request_id: ObjectId, stage: str):
+    """Update user on progress"""
+    messages = {
+        'downloading': "⬇️ Downloading original video...",
+        'converting': "🔄 Creating streamable version...",
+        'sending': "📤 Uploading to Telegram..."
+    }
+    await update.message.reply_text(messages[stage])
+    requests_collection.update_one(
+        {'_id': request_id},
+        {'$set': {'stage': stage}}
+    )
 
 async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -79,30 +97,23 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         request_id = requests_collection.insert_one({
             'user_id': update.message.from_user.id,
             'status': 'processing',
-            'progress': 0
+            'stage': 'starting'
         }).inserted_id
 
-        await update.message.reply_text("⏳ Processing your video, please wait...")
-        
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # Step 1: Convert HLS to MP4
-            output_file = os.path.join(tmp_dir, "output.mp4")
-            await convert_video(HLS_URL, output_file)
+            # Step 1: Download original
+            original_path = os.path.join(tmp_dir, "original.mp4")
+            await track_progress(update, request_id, 'downloading')
+            await download_original(HLS_URL, original_path)
             
-            # Step 2: Check size and split if needed
-            file_size = os.path.getsize(output_file)
-            if file_size > MAX_VIDEO_SIZE:
-                await update.message.reply_text("📦 Video is large, splitting into parts...")
-                chunk_dir = tempfile.mkdtemp()
-                chunks = await split_video(output_file, chunk_dir)
-                await send_video_chunks(update, chunks, chunk_dir)
-            else:
-                with open(output_file, 'rb') as f:
-                    await update.message.reply_video(
-                        video=f,
-                        caption="Here's your video!",
-                        supports_streaming=True
-                    )
+            # Step 2: Create streamable version
+            streamable_path = os.path.join(tmp_dir, "streamable.mp4")
+            await track_progress(update, request_id, 'converting')
+            await create_streamable_version(original_path, streamable_path)
+            
+            # Step 3: Send both versions
+            await track_progress(update, request_id, 'sending')
+            await send_video_package(update, original_path, streamable_path)
             
             # Update status
             requests_collection.update_one(
@@ -118,9 +129,10 @@ async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Something went wrong. Please try again later.")
     finally:
         if 'request_id' in locals():
+            status = 'failed' if 'e' in locals() else 'completed'
             requests_collection.update_one(
                 {'_id': request_id},
-                {'$set': {'status': 'failed' if 'e' in locals() else 'completed'}}
+                {'$set': {'status': status}}
             )
 
 def main():
