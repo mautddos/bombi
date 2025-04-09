@@ -8,13 +8,15 @@ import requests
 import telebot
 import time
 import psutil
-import datetime  # Fixed import
+import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from concurrent.futures import ThreadPoolExecutor
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import subprocess
 from PIL import Image
+from collections import deque
+import threading
 
 # Telegram credentials
 BOT_TOKEN = "7602913380:AAFF3gJ1f4aCw1k2nhdKAoMquj3aSIDiPXk"
@@ -27,6 +29,11 @@ client = TelegramClient(StringSession(), API_ID, API_HASH)
 # Bot start time for uptime calculation
 BOT_START_TIME = time.time()
 
+# Video upload queue system
+upload_queue = deque()
+queue_lock = threading.Lock()
+is_processing = False
+
 # Async function to start Telethon client as bot
 async def start_telethon():
     await client.start(bot_token=BOT_TOKEN)
@@ -37,6 +44,32 @@ loop.run_until_complete(start_telethon())
 
 executor = ThreadPoolExecutor(max_workers=4)
 video_data_cache = {}  # Store per-user quality options
+
+def process_queue():
+    global is_processing
+    while True:
+        with queue_lock:
+            if not upload_queue:
+                is_processing = False
+                break
+            task = upload_queue.popleft()
+        
+        try:
+            loop.run_until_complete(process_video_quality(*task))
+        except Exception as e:
+            print(f"Error processing video: {e}")
+            chat_id = task[0].chat.id
+            bot.send_message(chat_id, f"❌ Error processing video: {e}")
+        
+        time.sleep(1)  # Small delay between uploads
+
+def add_to_queue(message, video_url, quality_label):
+    global is_processing
+    with queue_lock:
+        upload_queue.append((message, video_url, quality_label))
+        if not is_processing:
+            is_processing = True
+            executor.submit(process_queue)
 
 # Extract slug
 def extract_slug(url):
@@ -123,7 +156,7 @@ async def download_video_async(video_url, file_name):
 async def process_video_quality(message, video_url, quality_label):
     chat_id = message.chat.id
     file_name = f"xh_{chat_id}.mp4"
-    downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video...")
+    downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video... (Position in queue: {len(upload_queue) + 1})")
 
     success = await download_video_async(video_url, file_name)
     if not success:
@@ -141,7 +174,6 @@ async def process_video_quality(message, video_url, quality_label):
             screenshot_files = sorted(
                 [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
                 key=lambda x: int(x.split('_')[1].split('.')[0])
-            )
             
             # Split into chunks of 10 to avoid flooding
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
@@ -185,7 +217,12 @@ def status_command(message):
     
     # Bot stats
     uptime_seconds = time.time() - BOT_START_TIME
-    uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))  # Fixed datetime usage
+    uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))
+    
+    # Queue stats
+    with queue_lock:
+        queue_size = len(upload_queue)
+        current_processing = "Yes" if is_processing else "No"
     
     # Create status message
     status_msg = f"""
@@ -200,6 +237,10 @@ def status_command(message):
 • Uptime: {uptime_str}
 • Ping: Calculating...
 
+*📊 Queue Information:*
+• Videos in queue: {queue_size}
+• Currently processing: {current_processing}
+
 *⚡ Performance:*
 • Active Threads: {executor._work_queue.qsize()}
 • Max Workers: {executor._max_workers}
@@ -208,7 +249,7 @@ def status_command(message):
 • Cached Videos: {len(video_data_cache)}
 
 🔧 *Version:*
-• Advanced XHamster Downloader v2.0
+• Advanced XHamster Downloader v2.1 (Queue System)
 """
     bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
 
@@ -225,13 +266,14 @@ Send me a xHamster video link and I'll download it for you with multiple quality
 • Fast downloads
 • 20 screenshots per video
 • Stable and reliable
+• Smart queue system (handles multiple requests)
 
 📌 *How to use:*
 Just send me a xHamster video URL and I'll handle the rest!
 
 🔧 *Commands:*
 /start - Show this message
-/status - Show bot status
+/status - Show bot status and queue information
 """
     bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
 
@@ -282,11 +324,19 @@ def handle_quality_choice(call):
 
     video_url = selected.get("url")
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    bot.send_message(call.message.chat.id, f"📥 Preparing {quality} download...")
-
-    executor.submit(lambda: loop.run_until_complete(
-        process_video_quality(call.message, video_url, quality)
-    ))
+    
+    # Add to queue instead of processing immediately
+    add_to_queue(call.message, video_url, quality)
+    
+    with queue_lock:
+        position = len(upload_queue)
+    
+    if position == 0:
+        queue_msg = "Your video will start processing immediately."
+    else:
+        queue_msg = f"Your video is in queue position {position + 1}. I'll notify you when processing starts."
+    
+    bot.send_message(call.message.chat.id, f"📥 Added to download queue:\n{queue_msg}")
 
 # Error handler
 @bot.message_handler(func=lambda msg: True)
