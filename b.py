@@ -4,14 +4,20 @@ import urllib.parse
 import asyncio
 import aiohttp
 import aiofiles
-import subprocess
 import requests
 import telebot
+import time
+import psutil
+from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from concurrent.futures import ThreadPoolExecutor
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+import subprocess
+from PIL import Image
+import math
 
+# Telegram credentials
 BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
 API_ID = 22625636
 API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
@@ -19,14 +25,26 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
 
-loop = asyncio.get_event_loop()
-executor = ThreadPoolExecutor()
-video_data_cache = {}
+# Bot start time for uptime calculation
+BOT_START_TIME = time.time()
 
+# Async function to start Telethon client as bot
+async def start_telethon():
+    await client.start(bot_token=BOT_TOKEN)
+    print("✅ Telethon client connected!")
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start_telethon())
+
+executor = ThreadPoolExecutor(max_workers=4)
+video_data_cache = {}  # Store per-user quality options
+
+# Extract slug
 def extract_slug(url):
     match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
     return match.group(1) if match else None
 
+# Get video options
 def get_video_options(xh_url):
     slug = extract_slug(xh_url)
     if not slug:
@@ -47,127 +65,225 @@ def get_video_options(xh_url):
             key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
             reverse=True
         )
-
-        for opt in options:
-            opt["thumbnail"] = thumbnail
-
         return title, thumbnail, options
     except Exception as e:
         print("API error:", e)
         return None, None, []
 
-def optimize_video(input_file, output_file):
+# Generate screenshots from video
+async def generate_screenshots(video_path, chat_id):
     try:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", input_file,
-            "-c", "copy", "-movflags", "+faststart", output_file
-        ], check=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        print("FFmpeg error:", e)
-        return False
+        # Get video duration
+        cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {video_path}"
+        duration = float(subprocess.check_output(cmd, shell=True).decode('utf-8').strip())
+        
+        # Create screenshots directory
+        screenshot_dir = f"screenshots_{chat_id}"
+        os.makedirs(screenshot_dir, exist_ok=True)
+        
+        # Calculate screenshot intervals (20 screenshots)
+        intervals = [i * (duration / 20) for i in range(1, 21)]
+        
+        # Generate screenshots
+        for i, interval in enumerate(intervals):
+            output_path = f"{screenshot_dir}/screenshot_{i+1}.jpg"
+            cmd = f"ffmpeg -ss {interval} -i {video_path} -vframes 1 -q:v 2 {output_path} -y"
+            subprocess.run(cmd, shell=True, check=True)
+            
+            # Optimize image
+            with Image.open(output_path) as img:
+                img.save(output_path, "JPEG", quality=85)
+        
+        return screenshot_dir
+    except Exception as e:
+        print("Screenshot generation error:", e)
+        return None
 
-async def download_file(url, path):
+# Async downloader
+async def download_video_async(video_url, file_name):
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as r:
-                if r.status == 200:
-                    async with aiofiles.open(path, 'wb') as f:
-                        await f.write(await r.read())
-                        return True
+            async with session.get(video_url) as resp:
+                if resp.status == 200:
+                    f = await aiofiles.open(file_name, mode='wb')
+                    await f.write(await resp.read())
+                    await f.close()
+                    return True
     except Exception as e:
-        print(f"Download failed: {e}")
+        print("Download error:", e)
     return False
 
-def generate_screenshots(video_path, output_dir, count=20):
-    os.makedirs(output_dir, exist_ok=True)
-    duration_cmd = ["ffprobe", "-v", "error", "-show_entries",
-                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
-    duration = float(subprocess.check_output(duration_cmd).strip())
-    interval = duration / (count + 1)
-    for i in range(1, count + 1):
-        timestamp = i * interval
-        screenshot_path = os.path.join(output_dir, f"screenshot_{i}.jpg")
-        subprocess.run([
-            "ffmpeg", "-ss", str(timestamp), "-i", video_path, "-frames:v", "1",
-            "-q:v", "2", screenshot_path, "-y"
-        ])
-
-async def process_video(message, video_url, quality, thumbnail_url):
+# Async handler
+async def process_video_quality(message, video_url, quality_label):
     chat_id = message.chat.id
-    base = f"xh_{chat_id}"
-    video_file = f"{base}.mp4"
-    thumb_file = f"{base}.jpg"
-    optimized_file = f"{base}_opt.mp4"
-    screenshots_dir = f"{base}_shots"
+    file_name = f"xh_{chat_id}.mp4"
+    downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video...")
 
-    bot.send_message(chat_id, f"⏳ Downloading {quality} video...")
-
-    await download_file(video_url, video_file)
-    thumb_ok = await download_file(thumbnail_url, thumb_file)
-
-    if not optimize_video(video_file, optimized_file):
-        bot.send_message(chat_id, "❌ Video optimization failed.")
+    success = await download_video_async(video_url, file_name)
+    if not success:
+        bot.edit_message_text("❌ Download failed.", chat_id, downloading_msg.message_id)
         return
 
+    # Generate and send screenshots
+    screenshot_msg = bot.send_message(chat_id, "📸 Generating screenshots...")
+    screenshot_dir = await generate_screenshots(file_name, chat_id)
+    
+    if screenshot_dir:
+        bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
+        try:
+            # Send screenshots as album
+            screenshot_files = sorted(
+                [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
+                key=lambda x: int(x.split('_')[1].split('.')[0])
+            )
+            
+            media = []
+            for i, screenshot in enumerate(screenshot_files[:10]):  # Send first 10 to avoid flooding
+                media.append(telebot.types.InputMediaPhoto(
+                    open(f"{screenshot_dir}/{screenshot}", 'rb'),
+                    caption=f"Screenshot {i+1}" if i == 0 else ""
+                ))
+            
+            bot.send_media_group(chat_id, media)
+            
+            # Clean up screenshots
+            for f in os.listdir(screenshot_dir):
+                os.remove(f"{screenshot_dir}/{f}")
+            os.rmdir(screenshot_dir)
+        except Exception as e:
+            print("Screenshot upload error:", e)
+    
+    # Upload video
+    bot.edit_message_text("✅ Uploading to Telegram...", chat_id, downloading_msg.message_id)
     try:
         await client.send_file(
-            chat_id,
-            file=optimized_file,
-            caption=f"🎬 Your {quality} video.",
-            thumb=thumb_file if thumb_ok else None,
+            chat_id, 
+            file=file_name, 
+            caption=f"🎥 Your {quality_label} video.\n⚡ @XHamsterDownloaderBot",
             supports_streaming=True
         )
-
-        generate_screenshots(optimized_file, screenshots_dir)
-        for shot in sorted(os.listdir(screenshots_dir)):
-            await client.send_file(chat_id, os.path.join(screenshots_dir, shot))
-
+        os.remove(file_name)
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Upload error: {e}")
-    finally:
-        for f in [video_file, thumb_file, optimized_file]:
-            if os.path.exists(f):
-                os.remove(f)
-        if os.path.exists(screenshots_dir):
-            for shot in os.listdir(screenshots_dir):
-                os.remove(os.path.join(screenshots_dir, shot))
-            os.rmdir(screenshots_dir)
+        bot.send_message(chat_id, f"❌ Upload failed: {e}")
 
+# Status command
+@bot.message_handler(commands=['status'])
+def status_command(message):
+    # System stats
+    cpu_usage = psutil.cpu_percent()
+    memory_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage('/').percent
+    
+    # Bot stats
+    uptime_seconds = time.time() - BOT_START_TIME
+    uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))
+    
+    # Create status message
+    status_msg = f"""
+🤖 *Bot Status Report* 🤖
+
+*🛠️ System Resources:*
+• CPU Usage: {cpu_usage}%
+• Memory Usage: {memory_usage}%
+• Disk Usage: {disk_usage}%
+
+*⏱️ Bot Runtime:*
+• Uptime: {uptime_str}
+• Ping: {bot.get_me()}
+
+*⚡ Performance:*
+• Active Threads: {executor._work_queue.qsize()}
+• Max Workers: {executor._max_workers}
+
+💾 *Cache Info:*
+• Cached Videos: {len(video_data_cache)}
+
+🔧 *Version:*
+• Advanced XHamster Downloader v2.0
+"""
+    bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
+
+# Start command
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    start_msg = """
+🌟 *Welcome to XHamster Downloader Bot* 🌟
+
+Send me a xHamster video link and I'll download it for you with multiple quality options!
+
+⚡ *Features:*
+• Multiple quality options
+• Fast downloads
+• 20 screenshots per video
+• Stable and reliable
+
+📌 *How to use:*
+Just send me a xHamster video URL and I'll handle the rest!
+
+🔧 *Commands:*
+/start - Show this message
+/status - Show bot status
+"""
+    bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
+
+# Handle video link
 @bot.message_handler(func=lambda msg: msg.text.startswith("http"))
 def handle_link(msg):
     title, thumb, options = get_video_options(msg.text.strip())
     if not options:
-        bot.send_message(msg.chat.id, "❌ No video found.")
+        bot.send_message(msg.chat.id, "❌ No video qualities found.")
         return
 
-    video_data_cache[msg.chat.id] = {"options": options, "title": title}
-    markup = InlineKeyboardMarkup()
+    video_data_cache[msg.chat.id] = {
+        "options": options,
+        "title": title
+    }
 
+    markup = InlineKeyboardMarkup()
     for opt in options:
         label = opt.get("format_id", "unknown")
         markup.add(InlineKeyboardButton(text=label, callback_data=f"q:{label}"))
 
-    bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose video quality:", parse_mode="Markdown", reply_markup=markup)
+    if thumb:
+        try:
+            bot.send_photo(
+                msg.chat.id, 
+                thumb, 
+                caption=f"🎬 *{title}*\nChoose a quality:", 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+            return
+        except:
+            pass
+    
+    bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
 
+# Handle button click
 @bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
-def handle_quality(call):
+def handle_quality_choice(call):
     quality = call.data.split("q:")[1]
     user_id = call.message.chat.id
     options = video_data_cache.get(user_id, {}).get("options", [])
-    selected = next((o for o in options if o.get("format_id") == quality), None)
 
+    selected = next((o for o in options if o.get("format_id") == quality), None)
     if not selected:
         bot.answer_callback_query(call.id, "Quality not found.")
         return
 
-    bot.edit_message_reply_markup(user_id, call.message.message_id)
-    loop.create_task(process_video(call.message, selected.get("url"), quality, selected.get("thumbnail")))
+    video_url = selected.get("url")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    bot.send_message(call.message.chat.id, f"📥 Preparing {quality} download...")
 
-async def main():
-    await client.start(bot_token=BOT_TOKEN)
-    print("🚀 Bot running with streaming, thumbnail fallback, and 20 screenshots...")
-    bot.polling(non_stop=True)
+    executor.submit(lambda: loop.run_until_complete(
+        process_video_quality(call.message, video_url, quality)
+    ))
 
-if __name__ == "__main__":
-    loop.run_until_complete(main())
+# Error handler
+@bot.message_handler(func=lambda msg: True)
+def handle_other_messages(msg):
+    bot.send_message(msg.chat.id, "Please send a valid xHamster video URL or use /start to see options.")
+
+# Start bot
+print("🚀 Advanced XHamster Downloader Bot is running...")
+bot.polling(none_stop=True, interval=0)
