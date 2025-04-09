@@ -121,7 +121,7 @@ async def generate_screenshots(video_path, chat_id):
             output_path = f"{screenshot_dir}/screenshot_{i+1}.jpg"
             cmd = (
                 f"ffmpeg -ss {interval} -i {video_path} "
-                f"-vframes 1 -q:v 2 -pix_fmt yuv420p "  # Added proper pixel format
+                f"-vframes 1 -q:v 2 -pix_fmt yuv420p "
                 f"{output_path} -y"
             )
             subprocess.run(cmd, shell=True, check=True, stderr=subprocess.DEVNULL)
