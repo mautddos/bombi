@@ -1,157 +1,145 @@
 import os
 import re
 import requests
+import urllib.parse
 import telebot
-from telebot import types
-import hashlib
-import json
-from datetime import datetime, timedelta
+import asyncio
+from telethon import TelegramClient
+from telethon.errors import FloodWaitError
+from config import BOT_TOKEN, API_ID, API_HASH
+from typing import Tuple, Optional
 
-# Telegram bot token
-BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+# Initialize bot and client
 bot = telebot.TeleBot(BOT_TOKEN)
+client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
 
-# Video request cache with expiration
-video_requests = {}
+# Constants
+XHAMSTER_DOMAIN = "xhamster.com"
+DOWNLOAD_TIMEOUT = 60
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB (Telegram limit for bots)
 
-class VideoRequest:
-    def __init__(self, qualities, title):
-        self.qualities = qualities
-        self.title = title
-        self.timestamp = datetime.now()
+class VideoDownloadError(Exception):
+    pass
+
+def extract_slug(url: str) -> Optional[str]:
+    """Extract video slug from xHamster URL."""
+    patterns = [
+        r"xhamster\.com\/videos\/([^\/]+)",
+        r"xhamster\.com\/movies\/([^\/]+)"
+    ]
     
-    def is_expired(self):
-        return datetime.now() - self.timestamp > timedelta(minutes=10)
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
 
-def extract_slug(url):
-    match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
-    return match.group(1) if match else None
+def get_video_info(xh_url: str) -> Tuple[Optional[str], Optional[str]]:
+    """Get video URL and thumbnail from xHamster."""
+    slug = extract_slug(xh_url)
+    if not slug:
+        return None, None
 
-def get_video_qualities(url):
+    encoded_url = urllib.parse.quote(f"https://{XHAMSTER_DOMAIN}/videos/{slug}")
+    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
+
     try:
-        slug = extract_slug(url)
-        if not slug:
-            return None, None
+        res = requests.get(api_url, timeout=10)
+        res.raise_for_status()
+        data = res.json().get("data", {})
         
-        api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={urllib.parse.quote(f'https://xhamster.com/videos/{slug}')}"
-        response = requests.get(api_url)
-        data = response.json().get('data', {})
-        
-        qualities = sorted(
-            [q for q in data.get('downloads', []) if q.get('url', '').endswith('.mp4')],
-            key=lambda x: int(re.search(r'(\d+)p', x.get('format_id', '0p')).group(1)),
+        thumbnail = data.get("thumbnail", "")
+        downloads = data.get("downloads", [])
+
+        # Filter and sort MP4 links by quality
+        mp4_links = sorted(
+            [d for d in downloads if d.get("url", "").endswith(".mp4")],
+            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
             reverse=True
         )
-        
-        return qualities, data.get('title', 'xHamster Video'), data.get('thumbnail', None)
-    except Exception as e:
-        print(f"Error fetching qualities: {e}")
-        return None, None, None
 
-def create_quality_keyboard(request_id):
-    keyboard = types.InlineKeyboardMarkup(row_width=2)
-    request = video_requests.get(request_id)
-    
-    if not request:
-        return None
-    
-    buttons = []
-    for i, quality in enumerate(request.qualities[:4]):  # Limit to 4 qualities max
-        btn_data = f"vid_{request_id}_{i}"
-        buttons.append(
-            types.InlineKeyboardButton(
-                text=quality['format_id'],
-                callback_data=btn_data
-            )
-        )
-    
-    # Add buttons in pairs
-    for i in range(0, len(buttons), 2):
-        keyboard.add(*buttons[i:i+2])
-    
-    return keyboard
+        return (mp4_links[0]["url"], thumbnail) if mp4_links else (None, None)
 
-@bot.message_handler(func=lambda m: 'xhamster.com/videos/' in m.text)
-def handle_video_request(message):
+    except (requests.RequestException, ValueError, KeyError) as e:
+        raise VideoDownloadError(f"Failed to fetch video info: {str(e)}")
+
+def download_video(video_url: str, file_path: str) -> None:
+    """Download video file with progress tracking."""
     try:
-        # Clean old requests
-        for req_id in list(video_requests.keys()):
-            if video_requests[req_id].is_expired():
-                del video_requests[req_id]
-        
-        qualities, title, thumbnail = get_video_qualities(message.text)
-        if not qualities:
-            return bot.reply_to(message, "❌ Couldn't fetch video information")
-        
-        # Create new request entry
-        request_id = hashlib.md5(f"{message.chat.id}{message.message_id}{datetime.now().timestamp()}".encode()).hexdigest()
-        video_requests[request_id] = VideoRequest(qualities, title)
-        
-        # Create response
-        keyboard = create_quality_keyboard(request_id)
-        if not keyboard:
-            return bot.reply_to(message, "❌ Error creating quality options")
-        
-        caption = f"🎬 {title}\nSelect quality:"
-        
-        if thumbnail:
-            bot.send_photo(
-                message.chat.id,
-                thumbnail,
-                caption=caption,
-                reply_markup=keyboard
-            )
-        else:
-            bot.send_message(
-                message.chat.id,
-                caption,
-                reply_markup=keyboard
-            )
+        with requests.get(video_url, stream=True, timeout=DOWNLOAD_TIMEOUT) as r:
+            r.raise_for_status()
             
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error: {str(e)}")
+            file_size = int(r.headers.get('content-length', 0))
+            if file_size > MAX_FILE_SIZE:
+                raise VideoDownloadError("Video file is too large for Telegram")
+                
+            with open(file_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+    except requests.RequestException as e:
+        raise VideoDownloadError(f"Download failed: {str(e)}")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('vid_'))
-def handle_quality_selection(call):
+async def send_video_with_telethon(chat_id: int, file_path: str) -> None:
+    """Send video using Telethon client."""
     try:
-        _, request_id, quality_idx = call.data.split('_')
-        request = video_requests.get(request_id)
-        
-        if not request or request.is_expired():
-            return bot.answer_callback_query(call.id, "❌ Request expired. Please send the URL again.")
-        
-        quality_idx = int(quality_idx)
-        if quality_idx >= len(request.qualities):
-            return bot.answer_callback_query(call.id, "❌ Invalid quality selection")
-        
-        selected = request.qualities[quality_idx]
-        bot.answer_callback_query(call.id, f"⬇️ Downloading {selected['format_id']}...")
-        
-        # Edit message to show download status
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f"⏳ Downloading {selected['format_id']} quality..."
+        await client.start()
+        await client.send_file(
+            entity=chat_id,
+            file=file_path,
+            caption="🎥 Here's your video from xHamster",
+            supports_streaming=True
         )
-        
-        # Start download in background
-        download_video(call.message.chat.id, selected['url'])
-        
+    except FloodWaitError as e:
+        raise VideoDownloadError(f"Flood wait: Please wait {e.seconds} seconds before trying again")
     except Exception as e:
-        bot.answer_callback_query(call.id, f"❌ Error: {str(e)}")
+        raise VideoDownloadError(f"Failed to send video: {str(e)}")
 
-def download_video(chat_id, url):
+@bot.message_handler(func=lambda message: message.text and XHAMSTER_DOMAIN in message.text)
+def handle_message(message):
+    """Handle incoming xHamster URLs."""
+    url = message.text.strip()
+    
     try:
-        # Implement your download logic here
-        # For example, using youtube-dl or requests
-        # Then send the file using bot.send_video()
+        # Send initial response
+        msg = bot.reply_to(message, "⏳ Processing your video, please wait...")
         
-        # This is a placeholder - implement actual download
-        bot.send_message(chat_id, f"📥 Download started from:\n{url}")
+        # Get video info
+        video_url, _ = get_video_info(url)
+        if not video_url:
+            raise VideoDownloadError("Could not find video URL")
         
+        # Download video
+        temp_file = f"temp_{message.message_id}.mp4"
+        download_video(video_url, temp_file)
+        
+        # Check file size
+        file_size = os.path.getsize(temp_file)
+        if file_size > MAX_FILE_SIZE:
+            raise VideoDownloadError("Video is too large (max 50MB)")
+        
+        # Edit message to show uploading status
+        bot.edit_message_text("📤 Uploading video...", message.chat.id, msg.message_id)
+        
+        # Send video
+        asyncio.run(send_video_with_telethon(message.chat.id, temp_file))
+        
+        # Clean up
+        os.remove(temp_file)
+        bot.delete_message(message.chat.id, msg.message_id)
+        
+    except VideoDownloadError as e:
+        bot.reply_to(message, f"❌ Error: {str(e)}")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Download failed: {str(e)}")
+        bot.reply_to(message, "❌ An unexpected error occurred. Please try again later.")
+        print(f"Error processing message: {str(e)}")
+    finally:
+        if 'temp_file' in locals() and os.path.exists(temp_file):
+            os.remove(temp_file)
 
-if __name__ == '__main__':
-    print("Bot started...")
-    bot.infinity_polling()
+if __name__ == "__main__":
+    print("Bot is running...")
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Bot stopped: {str(e)}")
