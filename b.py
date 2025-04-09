@@ -1,79 +1,168 @@
-import asyncio
-import requests
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
-from telethon import TelegramClient
-from config import BOT_TOKEN, API_ID, API_HASH
 import os
+import re
+import requests
+import urllib.parse
+import telebot
+from telebot import types
+import asyncio
+from telethon.sync import TelegramClient
+from concurrent.futures import ThreadPoolExecutor
 
-# Set up bot and dispatcher
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+# Telegram credentials
+BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+API_ID = 22625636  # Replace with your API ID (integer)
+API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"  # Replace with your API hash
 
-# Userbot session (to bypass 50MB limit)
-client = TelegramClient("session", API_ID, API_HASH)
+bot = telebot.TeleBot(BOT_TOKEN)
+client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
 
-# Start userbot
-async def start_userbot():
-    await client.start(bot_token=BOT_TOKEN)
-    print("Userbot ready.")
+# Thread pool for concurrent downloads
+executor = ThreadPoolExecutor(max_workers=4)
 
-@dp.message_handler(lambda message: message.text.startswith("http"))
-async def handle_link(message: types.Message):
-    url = message.text.strip()
-    encoded = requests.utils.quote(url)
-    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded}"
+# Helper to extract slug
+def extract_slug(url):
+    match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
+    return match.group(1) if match else None
+
+# Helper to get all available qualities
+def get_video_qualities(xh_url):
+    slug = extract_slug(xh_url)
+    if not slug:
+        return None, None, None
+
+    encoded_url = urllib.parse.quote(f"https://xhamster.com/videos/{slug}")
+    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
 
     try:
-        res = requests.get(api_url).json()
-        downloads = res["data"]["downloads"]
-        thumb = res["data"]["thumbnail"]
+        res = requests.get(api_url)
+        data = res.json().get("data", {})
+        thumbnail = data.get("thumbnail", "")
+        title = data.get("title", "xHamster Video")
+        downloads = data.get("downloads", [])
 
-        buttons = InlineKeyboardMarkup(row_width=2)
-        for d in downloads:
-            if d["url"].endswith(".mp4"):
-                btn = InlineKeyboardButton(
-                    text=f'{d["format_id"]} - {d["size"]}',
-                    callback_data=d["url"]
-                )
-                buttons.add(btn)
-
-        await bot.send_photo(
-            chat_id=message.chat.id,
-            photo=thumb,
-            caption="⏬ *Choose resolution to download:*",
-            reply_markup=buttons,
-            parse_mode="Markdown"
+        # Filter and sort MP4 links by quality
+        mp4_links = sorted(
+            [d for d in downloads if d.get("url", "").endswith(".mp4")],
+            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
+            reverse=True
         )
 
-    except Exception as e:
-        await message.answer(f"❌ Error: {e}")
+        return mp4_links, thumbnail, title
 
-@dp.callback_query_handler()
-async def callback_video(call: types.CallbackQuery):
-    await call.answer("⏳ Downloading your video, please wait...")
+    except Exception as e:
+        print("API Error:", e)
+        return None, None, None
+
+# Create quality selection keyboard
+def create_quality_keyboard(qualities):
+    keyboard = types.InlineKeyboardMarkup()
+    
+    # Group qualities in rows of 2 buttons
+    for i in range(0, len(qualities), 2):
+        row = []
+        for quality in qualities[i:i+2]:
+            btn = types.InlineKeyboardButton(
+                text=f"{quality['format_id']}",
+                callback_data=f"quality_{quality['url']}"
+            )
+            row.append(btn)
+        keyboard.add(*row)
+    
+    return keyboard
+
+@bot.message_handler(func=lambda message: message.text.startswith("http"))
+def handle_message(message):
+    url = message.text.strip()
+    
+    # Check if it's an xHamster URL
+    if "xhamster.com/videos/" not in url:
+        bot.reply_to(message, "❌ Please provide a valid xHamster video URL")
+        return
+    
+    bot.reply_to(message, "🔍 Fetching video qualities...")
+    
+    qualities, thumbnail, title = get_video_qualities(url)
+    
+    if not qualities:
+        bot.send_message(message.chat.id, "❌ Could not get video information.")
+        return
+    
+    # Send thumbnail with quality selection buttons
+    if thumbnail:
+        try:
+            bot.send_photo(
+                chat_id=message.chat.id,
+                photo=thumbnail,
+                caption=f"🎬 {title}\n\nSelect video quality:",
+                reply_markup=create_quality_keyboard(qualities)
+            )
+        except:
+            # Fallback if thumbnail fails
+            bot.send_message(
+                chat_id=message.chat.id,
+                text=f"🎬 {title}\n\nSelect video quality:",
+                reply_markup=create_quality_keyboard(qualities)
+            )
+    else:
+        bot.send_message(
+            chat_id=message.chat.id,
+            text=f"🎬 {title}\n\nSelect video quality:",
+            reply_markup=create_quality_keyboard(qualities)
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('quality_'))
+def handle_quality_selection(call):
+    video_url = call.data.replace('quality_', '')
+    chat_id = call.message.chat.id
+    
+    # Edit the message to show download is starting
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text="⏳ Downloading your selected quality video, please wait..."
+    )
+    
+    # Use thread pool to handle download without blocking
+    executor.submit(download_and_send_video, chat_id, video_url)
+
+def download_and_send_video(chat_id, video_url):
     try:
-        url = call.data
-        filename = "video.mp4"
-
-        # Download video
-        r = requests.get(url, stream=True)
-        with open(filename, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-
-        # Send via userbot
-        await client.send_file(call.message.chat.id, filename, caption="✅ Here's your video!")
-        os.remove(filename)
-
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Download the video in chunks
+        temp_file = f"temp_{chat_id}.mp4"
+        
+        with requests.get(video_url, stream=True) as r:
+            r.raise_for_status()
+            with open(temp_file, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        
+        # Send the video using Telethon
+        loop.run_until_complete(send_video(chat_id, temp_file))
+        
+        # Clean up
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            
     except Exception as e:
-        await call.message.answer(f"❌ Failed to send video.\nError: `{e}`", parse_mode="Markdown")
+        error_msg = f"❌ Failed to send video. Error: {str(e)}"
+        bot.send_message(chat_id, error_msg)
+    finally:
+        loop.close()
 
-async def main():
-    await start_userbot()
-    await dp.start_polling()
+async def send_video(chat_id, file_path):
+    async with TelegramClient("xhamster_userbot", API_ID, API_HASH) as client:
+        await client.send_file(
+            entity=chat_id,
+            file=file_path,
+            supports_streaming=True,
+            caption="🎥 Here's your xHamster video"
+        )
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# Start the bot
+print("Bot is running...")
+bot.infinity_polling()
