@@ -3,26 +3,23 @@ import re
 import requests
 import urllib.parse
 import telebot
-from telethon.sync import TelegramClient
-from telethon.tl.functions.messages import GetDialogsRequest
-from telethon.tl.types import InputPeerEmpty
+import asyncio
+from telethon import TelegramClient
 
-# Bot credentials
+# Telegram credentials
 BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
-API_ID = 22625636  # Replace with your API ID (integer)
-API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"  # Replace with your API hash
-SESSION_NAME = "xhamster_userbot"
+API_ID = 22625636  # integer
+API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
 bot = telebot.TeleBot(BOT_TOKEN)
+client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
 
-# Telethon userbot
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-client.start()
-
+# Helper to extract slug
 def extract_slug(url):
     match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
     return match.group(1) if match else None
 
+# Helper to get best .mp4
 def get_video_url(xh_url):
     slug = extract_slug(xh_url)
     if not slug:
@@ -37,7 +34,6 @@ def get_video_url(xh_url):
         thumbnail = data.get("thumbnail", "")
         downloads = data.get("downloads", [])
 
-        # Find best quality .mp4
         mp4_links = sorted(
             [d for d in downloads if d.get("url", "").endswith(".mp4")],
             key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
@@ -50,38 +46,39 @@ def get_video_url(xh_url):
             return None, None
 
     except Exception as e:
-        print("Error fetching API:", e)
+        print("API Error:", e)
         return None, None
 
 @bot.message_handler(func=lambda message: message.text.startswith("http"))
 def handle_message(message):
     url = message.text.strip()
-    bot.reply_to(message, "⏳ Processing your video, please wait...")
+    bot.reply_to(message, "⏳ Downloading your video, please wait...")
 
     video_url, thumb = get_video_url(url)
     if not video_url:
-        bot.send_message(message.chat.id, "❌ Couldn't find a valid video.")
+        bot.send_message(message.chat.id, "❌ Could not get video link.")
         return
 
-    file_name = "xhamster_video.mp4"
-
+    file_name = "video.mp4"
     try:
-        # Download video
         r = requests.get(video_url, stream=True)
         with open(file_name, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # Send via Telethon (userbot)
-        client.send_file(
-            entity=message.chat.id,
-            file=file_name,
-            caption="🎥 Here's your video from xHamster"
-        )
+        # Use asyncio to send the video with Telethon
+        asyncio.run(send_video(message.chat.id, file_name))
 
         os.remove(file_name)
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Failed to send video. {e}")
 
+# Async function to send video
+async def send_video(chat_id, file_path):
+    await client.start()
+    await client.send_file(entity=chat_id, file=file_path, caption="🎥 Here's your xHamster video.")
+
+# Start polling
+print("Bot is running...")
 bot.polling()
