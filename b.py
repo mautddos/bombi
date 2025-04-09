@@ -19,7 +19,7 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
 
-# Async function to start Telethon client as bot
+# Async function to start Telethon client
 async def start_telethon():
     await client.start(bot_token=BOT_TOKEN)
     print("✅ Telethon client connected!")
@@ -28,7 +28,7 @@ loop = asyncio.get_event_loop()
 loop.run_until_complete(start_telethon())
 
 executor = ThreadPoolExecutor(max_workers=4)
-video_data_cache = {}  # Store per-user quality options
+video_data_cache = {}  # Store per-user video options
 
 # Extract slug
 def extract_slug(url):
@@ -56,12 +56,17 @@ def get_video_options(xh_url):
             key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
             reverse=True
         )
+
+        # Save thumbnail URL in each option
+        for opt in options:
+            opt["thumbnail"] = thumbnail
+
         return title, thumbnail, options
     except Exception as e:
         print("API error:", e)
         return None, None, []
 
-# Async downloader
+# Async download
 async def download_video_async(video_url, file_name):
     try:
         async with aiohttp.ClientSession() as session:
@@ -75,21 +80,47 @@ async def download_video_async(video_url, file_name):
         print("Download error:", e)
     return False
 
-# Async handler
+# Process video with thumbnail
 async def process_video_quality(message, video_url, quality_label):
     chat_id = message.chat.id
     file_name = f"xh_{chat_id}.mp4"
+    thumb_file = f"xh_thumb_{chat_id}.jpg"
     downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video...")
 
+    # Get thumbnail URL
+    thumb_url = video_data_cache.get(chat_id, {}).get("options", [])[0].get("thumbnail", "")
+
+    try:
+        if thumb_url:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(thumb_url) as response:
+                    if response.status == 200:
+                        f = await aiofiles.open(thumb_file, mode='wb')
+                        await f.write(await response.read())
+                        await f.close()
+    except Exception as e:
+        print("Thumbnail download error:", e)
+        thumb_file = None
+
+    # Download the video
     success = await download_video_async(video_url, file_name)
     if not success:
-        bot.edit_message_text("❌ Download failed.", chat_id, downloading_msg.message_id)
+        bot.edit_message_text("❌ Video download failed.", chat_id, downloading_msg.message_id)
         return
 
     bot.edit_message_text("✅ Uploading to Telegram...", chat_id, downloading_msg.message_id)
+
     try:
-        await client.send_file(chat_id, file=file_name, caption=f"🎥 Your {quality_label} video.")
+        await client.send_file(
+            chat_id,
+            file=file_name,
+            caption=f"🎥 Your {quality_label} video.",
+            thumb=thumb_file if os.path.exists(thumb_file) else None,
+            supports_streaming=True
+        )
         os.remove(file_name)
+        if os.path.exists(thumb_file):
+            os.remove(thumb_file)
     except Exception as e:
         bot.send_message(chat_id, f"❌ Upload failed: {e}")
 
@@ -113,7 +144,7 @@ def handle_link(msg):
 
     bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
 
-# Handle button click
+# Handle quality button
 @bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
 def handle_quality_choice(call):
     quality = call.data.split("q:")[1]
@@ -134,5 +165,5 @@ def handle_quality_choice(call):
     ))
 
 # Start bot
-print("🚀 Bot with quality selection is running...")
+print("🚀 Bot with thumbnail support is running...")
 bot.polling()
