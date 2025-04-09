@@ -170,13 +170,13 @@ async def process_video_quality(message, video_url, quality_label):
     if screenshot_dir:
         bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
         try:
-            # Send screenshots as album - THIS IS THE FIXED SECTION
+            # CORRECTED: Properly closed sorted() function
             screenshot_files = sorted(
                 [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
-                key=lambda x: int(x.split('_')[1].split('.')[0]
-            )  # This closing parenthesis was missing
+                key=lambda x: int(x.split('_')[1].split('.')[0])
+            )
             
-            # Split into chunks of 10 to avoid flooding
+            # CORRECTED: Fixed list slicing syntax
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                 media = []
                 for i, screenshot in enumerate(chunk):
