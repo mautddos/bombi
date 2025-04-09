@@ -4,7 +4,7 @@ import requests
 import urllib.parse
 import telebot
 import asyncio
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 
 # Telegram credentials
 BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
@@ -13,6 +13,15 @@ API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
+
+# Start the Telethon client when the script starts
+async def start_telethon_client():
+    await client.start()
+    print("Telethon client started")
+
+# Run the Telethon client in the background
+loop = asyncio.get_event_loop()
+loop.create_task(start_telethon_client())
 
 # Helper to extract slug
 def extract_slug(url):
@@ -66,9 +75,8 @@ def handle_message(message):
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # Use asyncio to send the video with Telethon
-        asyncio.run(send_video(message.chat.id, file_name))
-
+        # Use the existing event loop to send the video
+        loop.run_until_complete(send_video(message.chat.id, file_name))
         os.remove(file_name)
 
     except Exception as e:
@@ -76,8 +84,14 @@ def handle_message(message):
 
 # Async function to send video
 async def send_video(chat_id, file_path):
-    await client.start()
-    await client.send_file(entity=chat_id, file=file_path, caption="🎥 Here's your xHamster video.")
+    try:
+        await client.send_file(
+            entity=chat_id, 
+            file=file_path, 
+            caption="🎥 Here's your xHamster video."
+        )
+    except Exception as e:
+        print(f"Error sending video: {e}")
 
 # Start polling
 print("Bot is running...")
