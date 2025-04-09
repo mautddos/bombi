@@ -1,192 +1,87 @@
 import os
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackContext,
-    CallbackQueryHandler,
-    filters
-)
+import re
+import requests
+import urllib.parse
+import telebot
+from telethon.sync import TelegramClient
+from telethon.tl.functions.messages import GetDialogsRequest
+from telethon.tl.types import InputPeerEmpty
 
-# Bot configuration with YOUR details
-TOKEN = '7671101775:AAGsXtFQwbTUCooj9d9uPvwYZu1euS--6B4'
-ADMIN_ID = 8167507955  # Your Telegram user ID
-CHANNEL_ID = -1002651707544  # Your channel ID
-CHANNEL_LINK = 'https://t.me/+t-tA66eXnv02NDE1'  # Your channel link
-JOIN_CHANNEL_TEXT = "Please join our channel to use this bot:"
-WELCOME_MESSAGE = "Welcome to Python Hosting Bot!\nUse /host to upload your Python file for hosting."
+# Bot credentials
+BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+API_ID = 22625636  # Replace with your API ID (integer)
+API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"  # Replace with your API hash
+SESSION_NAME = "xhamster_userbot"
 
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-async def start(update: Update, context: CallbackContext) -> None:
-    user = update.effective_user
-    chat_id = update.effective_chat.id
-    
-    # Check if user is in channel
+# Telethon userbot
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+client.start()
+
+def extract_slug(url):
+    match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
+    return match.group(1) if match else None
+
+def get_video_url(xh_url):
+    slug = extract_slug(xh_url)
+    if not slug:
+        return None, None
+
+    encoded_url = urllib.parse.quote(f"https://xhamster.com/videos/{slug}")
+    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
+
     try:
-        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
-        if member.status in ['left', 'kicked']:
-            # User is not in channel
-            keyboard = [
-                [InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)],
-                [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"{JOIN_CHANNEL_TEXT}",
-                reply_markup=reply_markup
-            )
-            return
-    except Exception as e:
-        logger.error(f"Error checking channel membership: {e}")
-        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
-        return
-    
-    # User is in channel or is admin
-    await update.message.reply_text(WELCOME_MESSAGE)
+        res = requests.get(api_url)
+        data = res.json().get("data", {})
+        thumbnail = data.get("thumbnail", "")
+        downloads = data.get("downloads", [])
 
-async def check_join_callback(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    user = query.from_user
-    
-    try:
-        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
-        if member.status in ['left', 'kicked']:
-            await query.answer("You haven't joined the channel yet! Click the 'Join Channel' button first.", show_alert=True)
+        # Find best quality .mp4
+        mp4_links = sorted(
+            [d for d in downloads if d.get("url", "").endswith(".mp4")],
+            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
+            reverse=True
+        )
+
+        if mp4_links:
+            return mp4_links[0]["url"], thumbnail
         else:
-            await query.answer("Thank you for joining! You can now use the bot.", show_alert=True)
-            await query.edit_message_text(WELCOME_MESSAGE)
-    except Exception as e:
-        logger.error(f"Error in check_join_callback: {e}")
-        await query.answer("There was an error. Please try again.", show_alert=True)
+            return None, None
 
-async def host_command(update: Update, context: CallbackContext) -> None:
-    user = update.effective_user
-    
-    # Check channel membership first
-    try:
-        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
-        if member.status in ['left', 'kicked']:
-            keyboard = [
-                [InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)],
-                [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"You must join our channel to use this feature.\n{JOIN_CHANNEL_TEXT}",
-                reply_markup=reply_markup
-            )
-            return
     except Exception as e:
-        logger.error(f"Error checking channel membership: {e}")
-        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
-        return
-    
-    # If user is in channel
-    await update.message.reply_text("Please send me your Python (.py) file to host.\n\nNote: Files should be less than 20MB.")
+        print("Error fetching API:", e)
+        return None, None
 
-async def handle_document(update: Update, context: CallbackContext) -> None:
-    user = update.effective_user
-    document = update.message.document
-    
-    # Check if it's a Python file
-    if not document.file_name.lower().endswith('.py'):
-        await update.message.reply_text("❌ Please send only Python files (.py extension).")
+@bot.message_handler(func=lambda message: message.text.startswith("http"))
+def handle_message(message):
+    url = message.text.strip()
+    bot.reply_to(message, "⏳ Processing your video, please wait...")
+
+    video_url, thumb = get_video_url(url)
+    if not video_url:
+        bot.send_message(message.chat.id, "❌ Couldn't find a valid video.")
         return
-    
-    # Check file size (max 20MB)
-    if document.file_size > 20 * 1024 * 1024:  # 20MB limit
-        await update.message.reply_text("❌ File too large. Maximum size is 20MB.")
-        return
-    
-    # Check channel membership
+
+    file_name = "xhamster_video.mp4"
+
     try:
-        member = await context.bot.get_chat_member(CHANNEL_ID, user.id)
-        if member.status in ['left', 'kicked']:
-            keyboard = [
-                [InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)],
-                [InlineKeyboardButton("I've Joined ✅", callback_data='check_join')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"You must join our channel to use this feature.\n{JOIN_CHANNEL_TEXT}",
-                reply_markup=reply_markup
-            )
-            return
-    except Exception as e:
-        logger.error(f"Error checking channel membership: {e}")
-        await update.message.reply_text("There was an error verifying your channel membership. Please try again later.")
-        return
-    
-    # Download the file
-    file = await context.bot.get_file(document.file_id)
-    download_path = f"user_files/{user.id}_{document.file_name}"
-    
-    # Create user_files directory if it doesn't exist
-    os.makedirs("user_files", exist_ok=True)
-    
-    try:
-        await file.download_to_drive(download_path)
-        
-        # Respond to user
-        await update.message.reply_text(
-            f"✅ File {document.file_name} received and hosted successfully!\n\n"
-            f"File size: {round(document.file_size/1024, 2)} KB\n"
-            f"Saved as: {download_path}"
+        # Download video
+        r = requests.get(video_url, stream=True)
+        with open(file_name, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Send via Telethon (userbot)
+        client.send_file(
+            entity=message.chat.id,
+            file=file_name,
+            caption="🎥 Here's your video from xHamster"
         )
-        
-        # Notify admin
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"📁 New file hosted by @{user.username or user.first_name} (ID: {user.id})\n"
-            f"📝 File: {document.file_name}\n"
-            f"💾 Size: {round(document.file_size/1024, 2)} KB"
-        )
+
+        os.remove(file_name)
+
     except Exception as e:
-        logger.error(f"Error handling file: {e}")
-        await update.message.reply_text("❌ There was an error processing your file. Please try again.")
+        bot.send_message(message.chat.id, f"❌ Failed to send video. {e}")
 
-async def error_handler(update: Update, context: CallbackContext) -> None:
-    """Log the error and send a telegram message to notify the developer."""
-    logger.error(msg="Exception while handling an update:", exc_info=context.error)
-    
-    # Notify admin
-    try:
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"⚠️ Error occurred:\n{context.error}\n\n"
-            f"Update: {update.to_dict() if update else 'None'}"
-        )
-    except Exception as e:
-        logger.error(f"Error sending error notification: {e}")
-
-def main() -> None:
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(TOKEN).build()
-
-    # Register commands
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("host", host_command))
-    
-    # Register callback for join check button
-    application.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join$'))
-    
-    # Register document handler
-    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    
-    # Register error handler
-    application.add_error_handler(error_handler)
-
-    # Start the Bot
-    print("Bot is running...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+bot.polling()
