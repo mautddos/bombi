@@ -61,7 +61,7 @@ async def split_video_by_size(input_path: str, output_dir: str):
     
     # Get file size
     file_size = os.path.getsize(input_path)
-    num_chunks = max(1, (file_size + MAX_CHUNK_SIZE - 1)
+    num_chunks = max(1, (file_size + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE)
     
     # Calculate split points
     split_points = [i * (duration / num_chunks) for i in range(1, num_chunks)]
@@ -169,7 +169,7 @@ def main():
     # Create application with API credentials
     application = Application.builder() \
         .token(TOKEN) \
-        .base_url("https://api.telegram.org") \  # You can use a custom URL if needed
+        .base_url("https://api.telegram.org") \
         .base_file_url("https://api.telegram.org/file") \
         .build()
         
@@ -187,4 +187,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
