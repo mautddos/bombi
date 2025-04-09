@@ -1,84 +1,79 @@
-import os
-import re
-import requests
-import urllib.parse
-import telebot
 import asyncio
+import requests
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
 from telethon import TelegramClient
+from config import BOT_TOKEN, API_ID, API_HASH
+import os
 
-# Telegram credentials
-BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
-API_ID = 22625636  # integer
-API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
+# Set up bot and dispatcher
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-bot = telebot.TeleBot(BOT_TOKEN)
-client = TelegramClient("xhamster_userbot", API_ID, API_HASH)
+# Userbot session (to bypass 50MB limit)
+client = TelegramClient("session", API_ID, API_HASH)
 
-# Helper to extract slug
-def extract_slug(url):
-    match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
-    return match.group(1) if match else None
+# Start userbot
+async def start_userbot():
+    await client.start(bot_token=BOT_TOKEN)
+    print("Userbot ready.")
 
-# Helper to get best .mp4
-def get_video_url(xh_url):
-    slug = extract_slug(xh_url)
-    if not slug:
-        return None, None
-
-    encoded_url = urllib.parse.quote(f"https://xhamster.com/videos/{slug}")
-    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
+@dp.message_handler(lambda message: message.text.startswith("http"))
+async def handle_link(message: types.Message):
+    url = message.text.strip()
+    encoded = requests.utils.quote(url)
+    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded}"
 
     try:
-        res = requests.get(api_url)
-        data = res.json().get("data", {})
-        thumbnail = data.get("thumbnail", "")
-        downloads = data.get("downloads", [])
+        res = requests.get(api_url).json()
+        downloads = res["data"]["downloads"]
+        thumb = res["data"]["thumbnail"]
 
-        mp4_links = sorted(
-            [d for d in downloads if d.get("url", "").endswith(".mp4")],
-            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
-            reverse=True
+        buttons = InlineKeyboardMarkup(row_width=2)
+        for d in downloads:
+            if d["url"].endswith(".mp4"):
+                btn = InlineKeyboardButton(
+                    text=f'{d["format_id"]} - {d["size"]}',
+                    callback_data=d["url"]
+                )
+                buttons.add(btn)
+
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=thumb,
+            caption="⏬ *Choose resolution to download:*",
+            reply_markup=buttons,
+            parse_mode="Markdown"
         )
 
-        if mp4_links:
-            return mp4_links[0]["url"], thumbnail
-        else:
-            return None, None
-
     except Exception as e:
-        print("API Error:", e)
-        return None, None
+        await message.answer(f"❌ Error: {e}")
 
-@bot.message_handler(func=lambda message: message.text.startswith("http"))
-def handle_message(message):
-    url = message.text.strip()
-    bot.reply_to(message, "⏳ Downloading your video, please wait...")
-
-    video_url, thumb = get_video_url(url)
-    if not video_url:
-        bot.send_message(message.chat.id, "❌ Could not get video link.")
-        return
-
-    file_name = "video.mp4"
+@dp.callback_query_handler()
+async def callback_video(call: types.CallbackQuery):
+    await call.answer("⏳ Downloading your video, please wait...")
     try:
-        r = requests.get(video_url, stream=True)
-        with open(file_name, 'wb') as f:
+        url = call.data
+        filename = "video.mp4"
+
+        # Download video
+        r = requests.get(url, stream=True)
+        with open(filename, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
+                if chunk:
+                    f.write(chunk)
 
-        # Use asyncio to send the video with Telethon
-        asyncio.run(send_video(message.chat.id, file_name))
-
-        os.remove(file_name)
+        # Send via userbot
+        await client.send_file(call.message.chat.id, filename, caption="✅ Here's your video!")
+        os.remove(filename)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Failed to send video. {e}")
+        await call.message.answer(f"❌ Failed to send video.\nError: `{e}`", parse_mode="Markdown")
 
-# Async function to send video
-async def send_video(chat_id, file_path):
-    await client.start()
-    await client.send_file(entity=chat_id, file=file_path, caption="🎥 Here's your xHamster video.")
+async def main():
+    await start_userbot()
+    await dp.start_polling()
 
-# Start polling
-print("Bot is running...")
-bot.polling()
+if __name__ == "__main__":
+    asyncio.run(main())
