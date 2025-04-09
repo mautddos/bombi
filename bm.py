@@ -1,185 +1,298 @@
-import logging
 import os
+import re
+import urllib.parse
 import asyncio
-import tempfile
+import aiohttp
+import aiofiles
+import requests
+import telebot
+import time
+import psutil
+import datetime  # Fixed import
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from concurrent.futures import ThreadPoolExecutor
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 import subprocess
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from pymongo import MongoClient
-from bson.objectid import ObjectId
+from PIL import Image
 
-# Configuration
-TOKEN = "7822455054:AAF-C_XdQBIAAWEXYDqQ2lrsIf1ewmDa46s"
-API_ID = 22625636  # Replace with your Telegram API ID
-API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"  # Replace with your Telegram API hash
-MONGO_URI = "mongodb+srv://zqffpg:1HKKatlqTOBcOwa6@cluster0.7dwrm.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-HLS_URL = "https://video-cf.xhcdn.com/8yE%2BseHYuE%2B6V0skGFlDrvM8w2V1Xg3Wy4L98rG6%2Bs0%3D/56/1744113600/media=hls4/multi=256x144:144p,426x240:240p/017/235/029/240p.h264.mp4.m3u8"
-MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
-MAX_CHUNK_SIZE = 45 * 1024 * 1024  # 45MB to be safe (leaving room for metadata)
+# Telegram credentials
+BOT_TOKEN = "8145114551:AAGOU9-3ZmRVxU91cPThM8vd932rNroR3WA"
+API_ID = 22625636
+API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
 
-# Setup logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+bot = telebot.TeleBot(BOT_TOKEN)
+client = TelegramClient(StringSession(), API_ID, API_HASH)
 
-# MongoDB setup
-client = MongoClient(MONGO_URI)
-db = client.video_bot
-requests_collection = db.requests
+# Bot start time for uptime calculation
+BOT_START_TIME = time.time()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message to get the video.')
+# Async function to start Telethon client as bot
+async def start_telethon():
+    await client.start(bot_token=BOT_TOKEN)
+    print("✅ Telethon client connected!")
 
-async def convert_video(input_url: str, output_path: str):
-    """Convert HLS to MP4 with optimized settings for size"""
-    command = [
-        'ffmpeg',
-        '-i', input_url,
-        '-c:v', 'libx264', '-preset', 'fast',
-        '-crf', '28',  # Higher CRF for smaller files (23-28 is reasonable)
-        '-movflags', '+faststart',
-        '-vf', 'scale=640:-2',  # Resize to 640 width
-        '-c:a', 'aac', '-b:a', '128k',  # Audio settings
-        '-f', 'mp4',
-        output_path
-    ]
-    subprocess.run(command, check=True)
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start_telethon())
 
-async def split_video_by_size(input_path: str, output_dir: str):
-    """Split video into chunks based on size (not duration)"""
-    # Get video duration in seconds
-    probe_cmd = [
-        'ffprobe',
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        input_path
-    ]
-    duration = float(subprocess.check_output(probe_cmd).decode('utf-8').strip())
-    
-    # Get file size
-    file_size = os.path.getsize(input_path)
-    num_chunks = max(1, (file_size + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE)
-    
-    # Calculate split points
-    split_points = [i * (duration / num_chunks) for i in range(1, num_chunks)]
-    
-    # Create split command
-    output_template = os.path.join(output_dir, 'part_%03d.mp4')
-    command = [
-        'ffmpeg',
-        '-i', input_path,
-        '-c', 'copy',
-        '-f', 'segment',
-        '-segment_times', ','.join(map(str, split_points)),
-        '-reset_timestamps', '1',
-        output_template
-    ]
-    subprocess.run(command, check=True)
-    
-    return sorted([f for f in os.listdir(output_dir) if f.startswith('part_')])
+executor = ThreadPoolExecutor(max_workers=4)
+video_data_cache = {}  # Store per-user quality options
 
-async def send_video_chunks(update: Update, chunks: list, chunk_dir: str):
-    """Send video chunks to user with progress updates"""
-    total_parts = len(chunks)
-    for i, chunk in enumerate(chunks, 1):
-        chunk_path = os.path.join(chunk_dir, chunk)
-        chunk_size = os.path.getsize(chunk_path) / (1024 * 1024)  # in MB
-        
-        try:
-            with open(chunk_path, 'rb') as f:
-                await update.message.reply_text(f"📤 Uploading part {i}/{total_parts} ({chunk_size:.1f}MB)...")
-                await update.message.reply_video(
-                    video=f,
-                    caption=f"Part {i} of {total_parts}",
-                    supports_streaming=True,
-                    read_timeout=60,
-                    write_timeout=60,
-                    connect_timeout=60
-                )
-            os.remove(chunk_path)
-        except Exception as e:
-            logger.error(f"Error sending chunk {i}: {e}")
-            await update.message.reply_text(f"⚠️ Failed to send part {i}. Please try again.")
-            raise
+# Extract slug
+def extract_slug(url):
+    match = re.search(r"xhamster\.com\/videos\/([^\/]+)", url)
+    return match.group(1) if match else None
 
-async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Get video options
+def get_video_options(xh_url):
+    slug = extract_slug(xh_url)
+    if not slug:
+        return None, None, []
+
+    encoded_url = urllib.parse.quote(f"https://xhamster.com/videos/{slug}")
+    api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
+
     try:
-        # Create request record
-        request_id = requests_collection.insert_one({
-            'user_id': update.message.from_user.id,
-            'status': 'processing',
-            'progress': 0
-        }).inserted_id
+        res = requests.get(api_url)
+        data = res.json().get("data", {})
+        title = data.get("title", "xHamster Video")
+        thumbnail = data.get("thumbnail", "")
+        downloads = data.get("downloads", [])
 
-        await update.message.reply_text("⏳ Processing your video, please wait...")
-        
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            # Step 1: Convert HLS to MP4 with size optimization
-            output_file = os.path.join(tmp_dir, "output.mp4")
-            await convert_video(HLS_URL, output_file)
-            
-            # Step 2: Check size and split if needed
-            file_size = os.path.getsize(output_file)
-            file_size_mb = file_size / (1024 * 1024)
-            
-            if file_size > MAX_VIDEO_SIZE:
-                await update.message.reply_text(
-                    f"📦 Video size is {file_size_mb:.1f}MB (over {MAX_VIDEO_SIZE/(1024*1024)}MB limit). "
-                    "Splitting into parts..."
-                )
-                chunk_dir = os.path.join(tmp_dir, "chunks")
-                os.makedirs(chunk_dir, exist_ok=True)
-                chunks = await split_video_by_size(output_file, chunk_dir)
-                await send_video_chunks(update, chunks, chunk_dir)
-            else:
-                await update.message.reply_text(f"📤 Uploading {file_size_mb:.1f}MB video...")
-                with open(output_file, 'rb') as f:
-                    await update.message.reply_video(
-                        video=f,
-                        caption="Here's your video!",
-                        supports_streaming=True,
-                        read_timeout=60,
-                        write_timeout=60,
-                        connect_timeout=60
-                    )
-            
-            # Update status
-            requests_collection.update_one(
-                {'_id': request_id},
-                {'$set': {'status': 'completed'}}
-            )
-            
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error: {e}")
-        await update.message.reply_text("❌ Video processing failed. Please try again.")
+        options = sorted(
+            [d for d in downloads if d.get("url", "").endswith(".mp4")],
+            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
+            reverse=True
+        )
+        return title, thumbnail, options
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        await update.message.reply_text("❌ Something went wrong. Please try again later.")
-    finally:
-        if 'request_id' in locals():
-            requests_collection.update_one(
-                {'_id': request_id},
-                {'$set': {'status': 'failed' if 'e' in locals() else 'completed'}}
-            )
+        print("API error:", e)
+        return None, None, []
 
-def main():
-    # Create application with timeout settings
-    application = Application.builder() \
-        .token(TOKEN) \
-        .read_timeout(60) \
-        .write_timeout(60) \
-        .connect_timeout(60) \
-        .pool_timeout(60) \
-        .build()
+# Generate screenshots from video
+async def generate_screenshots(video_path, chat_id):
+    try:
+        # Create screenshots directory
+        screenshot_dir = f"screenshots_{chat_id}"
+        os.makedirs(screenshot_dir, exist_ok=True)
         
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, send_video))
-    
-    # Run the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Get video duration
+        cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {video_path}"
+        duration = float(subprocess.check_output(cmd, shell=True).decode('utf-8').strip())
+        
+        # Calculate screenshot intervals (20 screenshots)
+        intervals = [i * (duration / 20) for i in range(1, 21)]
+        
+        # Generate screenshots with proper pixel format
+        for i, interval in enumerate(intervals):
+            output_path = f"{screenshot_dir}/screenshot_{i+1}.jpg"
+            cmd = (
+                f"ffmpeg -ss {interval} -i {video_path} "
+                f"-vframes 1 -q:v 2 -pix_fmt yuv420p "  # Added proper pixel format
+                f"{output_path} -y"
+            )
+            subprocess.run(cmd, shell=True, check=True, stderr=subprocess.DEVNULL)
+            
+            # Optimize image if it exists
+            if os.path.exists(output_path):
+                with Image.open(output_path) as img:
+                    img.save(output_path, "JPEG", quality=85)
+            else:
+                print(f"Screenshot not generated: {output_path}")
+        
+        return screenshot_dir
+    except Exception as e:
+        print("Screenshot generation error:", e)
+        return None
 
-if __name__ == '__main__':
-    main()
+# Async downloader
+async def download_video_async(video_url, file_name):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(video_url) as resp:
+                if resp.status == 200:
+                    f = await aiofiles.open(file_name, mode='wb')
+                    await f.write(await resp.read())
+                    await f.close()
+                    return True
+    except Exception as e:
+        print("Download error:", e)
+    return False
+
+# Async handler
+async def process_video_quality(message, video_url, quality_label):
+    chat_id = message.chat.id
+    file_name = f"xh_{chat_id}.mp4"
+    downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video...")
+
+    success = await download_video_async(video_url, file_name)
+    if not success:
+        bot.edit_message_text("❌ Download failed.", chat_id, downloading_msg.message_id)
+        return
+
+    # Generate and send screenshots
+    screenshot_msg = bot.send_message(chat_id, "📸 Generating screenshots...")
+    screenshot_dir = await generate_screenshots(file_name, chat_id)
+    
+    if screenshot_dir:
+        bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
+        try:
+            # Send screenshots as album
+            screenshot_files = sorted(
+                [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
+                key=lambda x: int(x.split('_')[1].split('.')[0])
+            )
+            
+            # Split into chunks of 10 to avoid flooding
+            for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
+                media = []
+                for i, screenshot in enumerate(chunk):
+                    media.append(telebot.types.InputMediaPhoto(
+                        open(f"{screenshot_dir}/{screenshot}", 'rb'),
+                        caption=f"Screenshot {i+1}" if i == 0 else ""
+                    ))
+                
+                bot.send_media_group(chat_id, media)
+            
+            # Clean up screenshots
+            for f in os.listdir(screenshot_dir):
+                os.remove(f"{screenshot_dir}/{f}")
+            os.rmdir(screenshot_dir)
+        except Exception as e:
+            print("Screenshot upload error:", e)
+    
+    # Upload video
+    bot.edit_message_text("✅ Uploading to Telegram...", chat_id, downloading_msg.message_id)
+    try:
+        await client.send_file(
+            chat_id, 
+            file=file_name, 
+            caption=f"🎥 Your {quality_label} video.\n⚡ @XHamsterDownloaderBot",
+            supports_streaming=True
+        )
+        if os.path.exists(file_name):
+            os.remove(file_name)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Upload failed: {e}")
+
+# Status command
+@bot.message_handler(commands=['status'])
+def status_command(message):
+    # System stats
+    cpu_usage = psutil.cpu_percent()
+    memory_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage('/').percent
+    
+    # Bot stats
+    uptime_seconds = time.time() - BOT_START_TIME
+    uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))  # Fixed datetime usage
+    
+    # Create status message
+    status_msg = f"""
+🤖 *Bot Status Report* 🤖
+
+*🛠️ System Resources:*
+• CPU Usage: {cpu_usage}%
+• Memory Usage: {memory_usage}%
+• Disk Usage: {disk_usage}%
+
+*⏱️ Bot Runtime:*
+• Uptime: {uptime_str}
+• Ping: Calculating...
+
+*⚡ Performance:*
+• Active Threads: {executor._work_queue.qsize()}
+• Max Workers: {executor._max_workers}
+
+💾 *Cache Info:*
+• Cached Videos: {len(video_data_cache)}
+
+🔧 *Version:*
+• Advanced XHamster Downloader v2.0
+"""
+    bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
+
+# Start command
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    start_msg = """
+🌟 *Welcome to XHamster Downloader Bot* 🌟
+
+Send me a xHamster video link and I'll download it for you with multiple quality options!
+
+⚡ *Features:*
+• Multiple quality options
+• Fast downloads
+• 20 screenshots per video
+• Stable and reliable
+
+📌 *How to use:*
+Just send me a xHamster video URL and I'll handle the rest!
+
+🔧 *Commands:*
+/start - Show this message
+/status - Show bot status
+"""
+    bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
+
+# Handle video link
+@bot.message_handler(func=lambda msg: msg.text.startswith("http"))
+def handle_link(msg):
+    title, thumb, options = get_video_options(msg.text.strip())
+    if not options:
+        bot.send_message(msg.chat.id, "❌ No video qualities found.")
+        return
+
+    video_data_cache[msg.chat.id] = {
+        "options": options,
+        "title": title
+    }
+
+    markup = InlineKeyboardMarkup()
+    for opt in options:
+        label = opt.get("format_id", "unknown")
+        markup.add(InlineKeyboardButton(text=label, callback_data=f"q:{label}"))
+
+    if thumb:
+        try:
+            bot.send_photo(
+                msg.chat.id, 
+                thumb, 
+                caption=f"🎬 *{title}*\nChoose a quality:", 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+            return
+        except:
+            pass
+    
+    bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
+
+# Handle button click
+@bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
+def handle_quality_choice(call):
+    quality = call.data.split("q:")[1]
+    user_id = call.message.chat.id
+    options = video_data_cache.get(user_id, {}).get("options", [])
+
+    selected = next((o for o in options if o.get("format_id") == quality), None)
+    if not selected:
+        bot.answer_callback_query(call.id, "Quality not found.")
+        return
+
+    video_url = selected.get("url")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    bot.send_message(call.message.chat.id, f"📥 Preparing {quality} download...")
+
+    executor.submit(lambda: loop.run_until_complete(
+        process_video_quality(call.message, video_url, quality)
+    ))
+
+# Error handler
+@bot.message_handler(func=lambda msg: True)
+def handle_other_messages(msg):
+    bot.send_message(msg.chat.id, "Please send a valid xHamster video URL or use /start to see options.")
+
+# Start bot
+print("🚀 Advanced XHamster Downloader Bot is running...")
+bot.polling(none_stop=True, interval=0)
