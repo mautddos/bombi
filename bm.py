@@ -9,20 +9,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Your bot token from BotFather
+# Your bot token (I see you shared it in your message)
 TOKEN = "7822455054:AAF-C_XdQBIAAWEXYDqQ2lrsIf1ewmDa46s"
-
-# The video URL you provided
-VIDEO_URL = "https://video-cf.xhcdn.com/8yE%2BseHYuE%2B6V0skGFlDrvM8w2V1Xg3Wy4L98rG6%2Bs0%3D/56/1744113600/media=hls4/multi=256x144:144p,426x240:240p/017/235/029/240p.h264.mp4.m3u8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
-    await update.message.reply_text('Hi! Send me any message and I will send you the video.')
+    await update.message.reply_text('Hi! I am SEMXI VIDEO DOWNLOADER. Send me any message and I will send you the video.')
 
 async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send the video when user sends any message."""
     try:
-        await update.message.reply_video(VIDEO_URL)
+        # Try with a direct video URL first (you'll need to replace this)
+        video_url = "https://example.com/direct-video.mp4"  # Replace with actual direct video URL
+        await update.message.reply_video(video_url)
+        
+        # Alternative: Send as document if video doesn't work
+        # await update.message.reply_document(video_url)
+        
     except Exception as e:
         logger.error(f"Error sending video: {e}")
         await update.message.reply_text("Sorry, I couldn't send the video. Please try again later.")
