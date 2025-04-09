@@ -61,7 +61,7 @@ async def split_video_by_size(input_path: str, output_dir: str):
     
     # Get file size
     file_size = os.path.getsize(input_path)
-    num_chunks = max(1, (file_size + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
+    num_chunks = max(1, (file_size + MAX_CHUNK_SIZE - 1)
     
     # Calculate split points
     split_points = [i * (duration / num_chunks) for i in range(1, num_chunks)]
@@ -187,3 +187,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
