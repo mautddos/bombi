@@ -71,28 +71,43 @@ def add_to_queue(message, video_url, quality_label):
             is_processing = True
             executor.submit(process_queue)
 
-# Extract slug - UPDATED to support multiple domains
-def extract_slug(url):
-    match = re.search(r"(xhamster\.com|xhamster43\.desi)\/videos\/([^\/]+)", url)
-    if not match:
-        return None
-    domain = match.group(1)
-    slug = match.group(2)
-    return f"{domain}/videos/{slug}"
+# Extract video info - UPDATED for multiple sites
+def extract_video_info(url):
+    # xHamster pattern
+    xhamster_match = re.search(r"(xhamster\.com|xhamster43\.desi)\/videos\/([^\/]+)", url)
+    if xhamster_match:
+        domain = xhamster_match.group(1)
+        slug = xhamster_match.group(2)
+        return {
+            "type": "xhamster",
+            "url": f"https://{domain}/videos/{slug}"
+        }
+    
+    # PornHub pattern
+    pornhub_match = re.search(r"(pornhub\.com|pornhub\.org)\/view_video\.php\?viewkey=([a-z0-9]+)", url)
+    if pornhub_match:
+        domain = pornhub_match.group(1)
+        viewkey = pornhub_match.group(2)
+        return {
+            "type": "pornhub",
+            "url": f"https://www.{domain}/view_video.php?viewkey={viewkey}"
+        }
+    
+    return None
 
-# Get video options - UPDATED to handle new domain
-def get_video_options(xh_url):
-    slug_path = extract_slug(xh_url)
-    if not slug_path:
+# Get video options - UPDATED for multiple sites
+def get_video_options(video_url):
+    video_info = extract_video_info(video_url)
+    if not video_info:
         return None, None, []
 
-    encoded_url = urllib.parse.quote(f"https://{slug_path}")
+    encoded_url = urllib.parse.quote(video_info["url"])
     api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
 
     try:
         res = requests.get(api_url)
         data = res.json().get("data", {})
-        title = data.get("title", "xHamster Video")
+        title = data.get("title", "Video")
         thumbnail = data.get("thumbnail", "")
         downloads = data.get("downloads", [])
 
@@ -159,7 +174,7 @@ async def download_video_async(video_url, file_name):
 # Async handler
 async def process_video_quality(message, video_url, quality_label):
     chat_id = message.chat.id
-    file_name = f"xh_{chat_id}.mp4"
+    file_name = f"video_{chat_id}.mp4"
     downloading_msg = bot.send_message(chat_id, f"⏳ Downloading {quality_label} video... (Position in queue: {len(upload_queue) + 1})")
 
     success = await download_video_async(video_url, file_name)
@@ -174,13 +189,11 @@ async def process_video_quality(message, video_url, quality_label):
     if screenshot_dir:
         bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
         try:
-            # CORRECTED: Properly closed sorted() function
             screenshot_files = sorted(
                 [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
                 key=lambda x: int(x.split('_')[1].split('.')[0])
             )
             
-            # CORRECTED: Fixed list slicing syntax
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                 media = []
                 for i, screenshot in enumerate(chunk):
@@ -254,21 +267,23 @@ def status_command(message):
 • Cached Videos: {len(video_data_cache)}
 
 🔧 *Version:*
-• Advanced XHamster Downloader v2.2 (Multi-Domain Support)
+• Advanced Video Downloader v2.3 (Multi-Site Support)
 """
     bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
 
-# Start command - UPDATED with new domain info
+# Start command - UPDATED with new site info
 @bot.message_handler(commands=['start'])
 def start_command(message):
     start_msg = """
-🌟 *Welcome to XHamster Downloader Bot* 🌟
+🌟 *Welcome to Video Downloader Bot* 🌟
 
-Send me a xHamster video link and I'll download it for you with multiple quality options!
+Send me a video link from supported sites and I'll download it for you with multiple quality options!
 
-⚡ *Supported Domains:*
+⚡ *Supported Sites:*
 • xhamster.com
 • xhamster43.desi
+• pornhub.com
+• pornhub.org
 
 *Features:*
 • Multiple quality options
@@ -278,7 +293,7 @@ Send me a xHamster video link and I'll download it for you with multiple quality
 • Smart queue system (handles multiple requests)
 
 📌 *How to use:*
-Just send me a xHamster video URL and I'll handle the rest!
+Just send me a video URL from supported sites and I'll handle the rest!
 
 🔧 *Commands:*
 /start - Show this message
@@ -286,8 +301,11 @@ Just send me a xHamster video URL and I'll handle the rest!
 """
     bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
 
-# Handle video link - UPDATED regex pattern
-@bot.message_handler(func=lambda msg: re.match(r"https?://(xhamster\.com|xhamster43\.desi)/", msg.text.strip()))
+# Handle video link - UPDATED for multiple sites
+@bot.message_handler(func=lambda msg: re.match(
+    r"https?://(xhamster\.com|xhamster43\.desi|pornhub\.com|pornhub\.org)/", 
+    msg.text.strip()
+))
 def handle_link(msg):
     title, thumb, options = get_video_options(msg.text.strip())
     if not options:
@@ -350,8 +368,8 @@ def handle_quality_choice(call):
 # Error handler
 @bot.message_handler(func=lambda msg: True)
 def handle_other_messages(msg):
-    bot.send_message(msg.chat.id, "Please send a valid xHamster video URL (from xhamster.com or xhamster43.desi) or use /start to see options.")
+    bot.send_message(msg.chat.id, "Please send a valid video URL from supported sites (xHamster or PornHub) or use /start to see options.")
 
 # Start bot
-print("🚀 Advanced XHamster Downloader Bot is running...")
+print("🚀 Advanced Video Downloader Bot is running...")
 bot.polling(none_stop=True, interval=0)
