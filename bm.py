@@ -284,29 +284,28 @@ async def process_video_quality(message, video_url, quality_label):
     screenshot_msg = bot.send_message(chat_id, "📸 Generating screenshots...")
     screenshot_dir = await generate_screenshots(file_name, chat_id)
     
-    if screenshot_dir:
-        bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
-        try:
-            screenshot_files = sorted(
-                [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
-                key=lambda x: int(x.split('_')[1].split('.')[0])
+   if screenshot_dir:
+    bot.edit_message_text("🖼️ Uploading screenshots...", chat_id, screenshot_msg.message_id)
+    try:
+        screenshot_files = sorted(
+            [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
+            key=lambda x: int(x.split('_')[1].split('.')[0])
+        )
+        
+        for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
+            media = []
+            for i, screenshot in enumerate(chunk):
+                media.append(telebot.types.InputMediaPhoto(
+                    open(f"{screenshot_dir}/{screenshot}", 'rb'),
+                    caption=f"Screenshot {i+1}" if i == 0 else ""
+                ))
             
-            for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
-                media = []
-                for i, screenshot in enumerate(chunk):
-                    media.append(telebot.types.InputMediaPhoto(
-                        open(f"{screenshot_dir}/{screenshot}", 'rb'),
-                        caption=f"Screenshot {i+1}" if i == 0 else ""
-                    ))
-                
-                bot.send_media_group(chat_id, media)
-            
-            # Clean up screenshots
-            for f in os.listdir(screenshot_dir):
-                os.remove(f"{screenshot_dir}/{f}")
-            os.rmdir(screenshot_dir)
-        except Exception as e:
-            print("Screenshot upload error:", e)
+            bot.send_media_group(chat_id, media)
+        
+        # Clean up screenshots
+        for f in os.listdir(screenshot_dir):
+            os.remove(f"{screenshot_dir}/{f}")
+        os.rmdir(screenshot_dir)
     
     # Upload video
     bot.edit_message_text("⏫ Preparing to upload video...", chat_id, downloading_msg.message_id)
