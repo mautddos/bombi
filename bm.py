@@ -93,6 +93,28 @@ def extract_video_info(url):
             "url": f"https://www.{domain}/view_video.php?viewkey={viewkey}"
         }
     
+    # XNXX pattern
+    xnxx_match = re.search(r"(xnxx\.com)\/video-([a-z0-9]+)\/([^\/]+)", url)
+    if xnxx_match:
+        domain = xnxx_match.group(1)
+        video_id = xnxx_match.group(2)
+        slug = xnxx_match.group(3)
+        return {
+            "type": "xnxx",
+            "url": f"https://www.{domain}/video-{video_id}/{slug}"
+        }
+    
+    # XVideos pattern
+    xvideos_match = re.search(r"(xvideos\.com)\/video([^\/]+)\/([^\/]+)", url)
+    if xvideos_match:
+        domain = xvideos_match.group(1)
+        video_id = xvideos_match.group(2)
+        slug = xvideos_match.group(3)
+        return {
+            "type": "xvideos",
+            "url": f"https://www.{domain}/video{video_id}/{slug}"
+        }
+    
     return None
 
 # Get video options - UPDATED for multiple sites
@@ -267,7 +289,7 @@ def status_command(message):
 • Cached Videos: {len(video_data_cache)}
 
 🔧 *Version:*
-• Advanced Video Downloader v2.3 (Multi-Site Support)
+• Advanced Video Downloader v2.4 (Multi-Site Support)
 """
     bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
 
@@ -284,6 +306,8 @@ Send me a video link from supported sites and I'll download it for you with mult
 • xhamster43.desi
 • pornhub.com
 • pornhub.org
+• xnxx.com
+• xvideos.com
 
 *Features:*
 • Multiple quality options
@@ -303,7 +327,7 @@ Just send me a video URL from supported sites and I'll handle the rest!
 
 # Handle video link - UPDATED for multiple sites
 @bot.message_handler(func=lambda msg: re.match(
-    r"https?://(xhamster\.com|xhamster43\.desi|pornhub\.com|pornhub\.org)/", 
+    r"https?://(xhamster\.com|xhamster43\.desi|pornhub\.com|pornhub\.org|xnxx\.com|xvideos\.com)/", 
     msg.text.strip()
 ))
 def handle_link(msg):
@@ -368,7 +392,7 @@ def handle_quality_choice(call):
 # Error handler
 @bot.message_handler(func=lambda msg: True)
 def handle_other_messages(msg):
-    bot.send_message(msg.chat.id, "Please send a valid video URL from supported sites (xHamster or PornHub) or use /start to see options.")
+    bot.send_message(msg.chat.id, "Please send a valid video URL from supported sites (xHamster, PornHub, XNXX, or XVideos) or use /start to see options.")
 
 # Start bot
 print("🚀 Advanced Video Downloader Bot is running...")
