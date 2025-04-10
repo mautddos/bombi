@@ -71,53 +71,62 @@ def add_to_queue(message, video_url, quality_label):
             is_processing = True
             executor.submit(process_queue)
 
-# Extract video info - UPDATED for multiple sites
+# Extract video info - UPDATED for multiple sites with better XVideos pattern
 def extract_video_info(url):
+    # Normalize URL by removing www. if present
+    normalized_url = re.sub(r'https?://(www\.)?', 'https://', url, flags=re.IGNORECASE)
+    
     # xHamster pattern
-    xhamster_match = re.search(r"(xhamster\.com|xhamster43\.desi)\/videos\/([^\/]+)", url)
+    xhamster_match = re.search(r"xhamster(43\.desi|\.com)/videos/([^\/]+)", normalized_url, re.IGNORECASE)
     if xhamster_match:
         domain = xhamster_match.group(1)
         slug = xhamster_match.group(2)
         return {
             "type": "xhamster",
-            "url": f"https://{domain}/videos/{slug}"
+            "url": f"https://xhamster{domain}/videos/{slug}"
         }
     
     # PornHub pattern
-    pornhub_match = re.search(r"(pornhub\.com|pornhub\.org)\/view_video\.php\?viewkey=([a-z0-9]+)", url)
+    pornhub_match = re.search(r"pornhub\.(com|org)/view_video\.php\?viewkey=([a-z0-9]+)", normalized_url, re.IGNORECASE)
     if pornhub_match:
         domain = pornhub_match.group(1)
         viewkey = pornhub_match.group(2)
         return {
             "type": "pornhub",
-            "url": f"https://www.{domain}/view_video.php?viewkey={viewkey}"
+            "url": f"https://www.pornhub.{domain}/view_video.php?viewkey={viewkey}"
         }
     
     # XNXX pattern
-    xnxx_match = re.search(r"(xnxx\.com)\/video-([a-z0-9]+)\/([^\/]+)", url)
+    xnxx_match = re.search(r"xnxx\.com/(video-[a-z0-9]+/[^\/]+|videos?/[a-z0-9]+)", normalized_url, re.IGNORECASE)
     if xnxx_match:
-        domain = xnxx_match.group(1)
-        video_id = xnxx_match.group(2)
-        slug = xnxx_match.group(3)
+        path = xnxx_match.group(1)
         return {
             "type": "xnxx",
-            "url": f"https://www.{domain}/video-{video_id}/{slug}"
+            "url": f"https://www.xnxx.com/{path}"
         }
     
-    # XVideos pattern
-    xvideos_match = re.search(r"(xvideos\.com)\/video([^\/]+)\/([^\/]+)", url)
+    # XVideos pattern - improved to handle more URL formats
+    xvideos_match = re.search(
+        r"xvideos\.com/(video([0-9]+)(?:/[^\/]+)?|profiles/[^\/]+-.*/videos|\.com/video\.fulluv[0-9]+/[^\/]+)",
+        normalized_url,
+        re.IGNORECASE
+    )
     if xvideos_match:
-        domain = xvideos_match.group(1)
-        video_id = xvideos_match.group(2)
-        slug = xvideos_match.group(3)
-        return {
-            "type": "xvideos",
-            "url": f"https://www.{domain}/video{video_id}/{slug}"
-        }
+        if xvideos_match.group(2):  # Standard video URL
+            video_id = xvideos_match.group(2)
+            return {
+                "type": "xvideos",
+                "url": f"https://www.xvideos.com/video{video_id}/"
+            }
+        else:  # Full video URL or other format
+            return {
+                "type": "xvideos",
+                "url": normalized_url
+            }
     
     return None
 
-# Get video options - UPDATED for multiple sites
+# Get video options - UPDATED with better error handling
 def get_video_options(video_url):
     video_info = extract_video_info(video_url)
     if not video_info:
@@ -127,17 +136,36 @@ def get_video_options(video_url):
     api_url = f"https://vkrdownloader.xyz/server/?api_key=vkrdownloader&vkr={encoded_url}"
 
     try:
-        res = requests.get(api_url)
-        data = res.json().get("data", {})
+        res = requests.get(api_url, timeout=10)
+        data = res.json()
+        
+        if not data.get("success", False):
+            print(f"API Error: {data.get('message', 'Unknown error')}")
+            return None, None, []
+            
+        data = data.get("data", {})
         title = data.get("title", "Video")
         thumbnail = data.get("thumbnail", "")
         downloads = data.get("downloads", [])
 
-        options = sorted(
-            [d for d in downloads if d.get("url", "").endswith(".mp4")],
-            key=lambda x: int(re.search(r"(\d+)p", x.get("format_id", "0p")).group(1)),
-            reverse=True
-        )
+        options = []
+        for d in downloads:
+            if d.get("url", "").endswith(".mp4"):
+                try:
+                    # Extract resolution from format_id (e.g., "720p" -> 720)
+                    res_match = re.search(r"(\d+)p", d.get("format_id", "0p"))
+                    resolution = int(res_match.group(1)) if res_match else 0
+                    options.append({
+                        "format_id": d.get("format_id", f"{resolution}p"),
+                        "url": d.get("url"),
+                        "resolution": resolution
+                    })
+                except Exception as e:
+                    print(f"Error processing quality option: {e}")
+                    continue
+
+        # Sort by resolution descending
+        options = sorted(options, key=lambda x: x["resolution"], reverse=True)
         return title, thumbnail, options
     except Exception as e:
         print("API error:", e)
@@ -325,7 +353,6 @@ Just send me a video URL from supported sites and I'll handle the rest!
 """
     bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
 
-
 # Handle video link - UPDATED regex pattern to be more inclusive
 @bot.message_handler(func=lambda msg: re.match(
     r"https?://(www\.)?(xhamster\.com|xhamster43\.desi|pornhub\.com|pornhub\.org|xnxx\.com|xvideos\.com)/", 
@@ -333,107 +360,71 @@ Just send me a video URL from supported sites and I'll handle the rest!
     re.IGNORECASE
 ))
 def handle_link(msg):
-    title, thumb, options = get_video_options(msg.text.strip())
-    if not options:
-        bot.send_message(msg.chat.id, "❌ No video qualities found.")
-        return
-
-    video_data_cache[msg.chat.id] = {
-        "options": options,
-        "title": title
-    }
-
-    markup = InlineKeyboardMarkup()
-    for opt in options:
-        label = opt.get("format_id", "unknown")
-        markup.add(InlineKeyboardButton(text=label, callback_data=f"q:{label}"))
-
-    if thumb:
-        try:
-            bot.send_photo(
-                msg.chat.id, 
-                thumb, 
-                caption=f"🎬 *{title}*\nChoose a quality:", 
-                parse_mode="Markdown", 
-                reply_markup=markup
-            )
+    try:
+        title, thumb, options = get_video_options(msg.text.strip())
+        if not options:
+            bot.send_message(msg.chat.id, "❌ No video qualities found. Please try another URL or check if the video is available.")
             return
-        except:
-            pass
-    
-    bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
 
-# Update extract_video_info to handle more URL patterns
-def extract_video_info(url):
-    # Normalize URL by removing www. if present
-    normalized_url = re.sub(r'https?://(www\.)?', 'https://', url, flags=re.IGNORECASE)
-    
-    # xHamster pattern (handles more variations)
-    xhamster_match = re.search(r"xhamster(43\.desi|\.com)/videos/([^\/]+)", normalized_url, re.IGNORECASE)
-    if xhamster_match:
-        domain = xhamster_match.group(1)
-        slug = xhamster_match.group(2)
-        return {
-            "type": "xhamster",
-            "url": f"https://xhamster{domain}/videos/{slug}"
+        video_data_cache[msg.chat.id] = {
+            "options": options,
+            "title": title
         }
-    
-    # PornHub pattern (handles more variations)
-    pornhub_match = re.search(r"pornhub\.(com|org)/view_video\.php\?viewkey=([a-z0-9]+)", normalized_url, re.IGNORECASE)
-    if pornhub_match:
-        domain = pornhub_match.group(1)
-        viewkey = pornhub_match.group(2)
-        return {
-            "type": "pornhub",
-            "url": f"https://www.pornhub.{domain}/view_video.php?viewkey={viewkey}"
-        }
-    
-    # XNXX pattern (handles more variations)
-    xnxx_match = re.search(r"xnxx\.com/(video-[a-z0-9]+/[^\/]+|videos?/[a-z0-9]+)", normalized_url, re.IGNORECASE)
-    if xnxx_match:
-        path = xnxx_match.group(1)
-        return {
-            "type": "xnxx",
-            "url": f"https://www.xnxx.com/{path}"
-        }
-    
-    # XVideos pattern (handles more variations)
-    xvideos_match = re.search(r"xvideos\.com/(video[0-9]+/[^\/]+|profiles/[^\/]+-.*/videos)", normalized_url, re.IGNORECASE)
-    if xvideos_match:
-        path = xvideos_match.group(1)
-        return {
-            "type": "xvideos",
-            "url": f"https://www.xvideos.com/{path}"
-        }
-    
-    return None
+
+        markup = InlineKeyboardMarkup()
+        for opt in options:
+            label = opt.get("format_id", "unknown")
+            markup.add(InlineKeyboardButton(text=label, callback_data=f"q:{label}"))
+
+        if thumb:
+            try:
+                bot.send_photo(
+                    msg.chat.id, 
+                    thumb, 
+                    caption=f"🎬 *{title}*\nChoose a quality:", 
+                    parse_mode="Markdown", 
+                    reply_markup=markup
+                )
+                return
+            except:
+                pass
+        
+        bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
+    except Exception as e:
+        print(f"Error handling link: {e}")
+        bot.send_message(msg.chat.id, "❌ An error occurred while processing this URL. Please try again later.")
+
 # Handle button click
 @bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
 def handle_quality_choice(call):
-    quality = call.data.split("q:")[1]
-    user_id = call.message.chat.id
-    options = video_data_cache.get(user_id, {}).get("options", [])
+    try:
+        quality = call.data.split("q:")[1]
+        user_id = call.message.chat.id
+        options = video_data_cache.get(user_id, {}).get("options", [])
 
-    selected = next((o for o in options if o.get("format_id") == quality), None)
-    if not selected:
-        bot.answer_callback_query(call.id, "Quality not found.")
-        return
+        selected = next((o for o in options if o.get("format_id") == quality), None)
+        if not selected:
+            bot.answer_callback_query(call.id, "Quality not found.")
+            return
 
-    video_url = selected.get("url")
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    
-    # Add to queue instead of processing immediately
-    add_to_queue(call.message, video_url, quality)
-    
-    with queue_lock:
-        position = len(upload_queue)
-    
-    if position == 0:
-        queue_msg = "Your video will start processing immediately."
-    else:
-        queue_msg = f"Your video is in queue position {position + 1}. I'll notify you when processing starts."
-    
-    bot.send_message(call.message.chat.id, f"📥 Added to download queue:\n{queue_msg}")
+        video_url = selected.get("url")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        
+        # Add to queue instead of processing immediately
+        add_to_queue(call.message, video_url, quality)
+        
+        with queue_lock:
+            position = len(upload_queue)
+        
+        if position == 0:
+            queue_msg = "Your video will start processing immediately."
+        else:
+            queue_msg = f"Your video is in queue position {position + 1}. I'll notify you when processing starts."
+        
+        bot.send_message(call.message.chat.id, f"📥 Added to download queue:\n{queue_msg}")
+    except Exception as e:
+        print(f"Error handling quality choice: {e}")
+        bot.answer_callback_query(call.id, "An error occurred. Please try again.")
 
 # Error handler
 @bot.message_handler(func=lambda msg: True)
