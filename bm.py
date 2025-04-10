@@ -71,52 +71,53 @@ def add_to_queue(message, video_url, quality_label):
             is_processing = True
             executor.submit(process_queue)
 
-# Extract video info - Updated with better URL patterns
+# Extract video info - UPDATED for multiple sites
 def extract_video_info(url):
-    # Normalize URL by removing www. if present
-    normalized_url = re.sub(r'https?://(www\.)?', 'https://', url, flags=re.IGNORECASE)
-    
-    # xHamster pattern (handles more variations)
-    xhamster_match = re.search(r"xhamster(43\.desi|\.com)/videos/([^\/]+)", normalized_url, re.IGNORECASE)
+    # xHamster pattern
+    xhamster_match = re.search(r"(xhamster\.com|xhamster43\.desi)\/videos\/([^\/]+)", url)
     if xhamster_match:
         domain = xhamster_match.group(1)
         slug = xhamster_match.group(2)
         return {
             "type": "xhamster",
-            "url": f"https://xhamster{domain}/videos/{slug}"
+            "url": f"https://{domain}/videos/{slug}"
         }
     
-    # PornHub pattern (handles more variations)
-    pornhub_match = re.search(r"pornhub\.(com|org)/view_video\.php\?viewkey=([a-z0-9]+)", normalized_url, re.IGNORECASE)
+    # PornHub pattern
+    pornhub_match = re.search(r"(pornhub\.com|pornhub\.org)\/view_video\.php\?viewkey=([a-z0-9]+)", url)
     if pornhub_match:
         domain = pornhub_match.group(1)
         viewkey = pornhub_match.group(2)
         return {
             "type": "pornhub",
-            "url": f"https://www.pornhub.{domain}/view_video.php?viewkey={viewkey}"
+            "url": f"https://www.{domain}/view_video.php?viewkey={viewkey}"
         }
     
-    # XNXX pattern (handles more variations)
-    xnxx_match = re.search(r"xnxx\.com/(video-[a-z0-9]+/[^\/]+|videos?/[a-z0-9]+)", normalized_url, re.IGNORECASE)
+    # XNXX pattern
+    xnxx_match = re.search(r"(xnxx\.com)\/video-([a-z0-9]+)\/([^\/]+)", url)
     if xnxx_match:
-        path = xnxx_match.group(1)
+        domain = xnxx_match.group(1)
+        video_id = xnxx_match.group(2)
+        slug = xnxx_match.group(3)
         return {
             "type": "xnxx",
-            "url": f"https://www.xnxx.com/{path}"
+            "url": f"https://www.{domain}/video-{video_id}/{slug}"
         }
     
-    # XVideos pattern (handles more variations)
-    xvideos_match = re.search(r"xvideos\.com/(video[0-9]+/[^\/]+|profiles/[^\/]+-.*/videos)", normalized_url, re.IGNORECASE)
+    # XVideos pattern
+    xvideos_match = re.search(r"(xvideos\.com)\/video([^\/]+)\/([^\/]+)", url)
     if xvideos_match:
-        path = xvideos_match.group(1)
+        domain = xvideos_match.group(1)
+        video_id = xvideos_match.group(2)
+        slug = xvideos_match.group(3)
         return {
             "type": "xvideos",
-            "url": f"https://www.xvideos.com/{path}"
+            "url": f"https://www.{domain}/video{video_id}/{slug}"
         }
     
     return None
 
-# Get video options
+# Get video options - UPDATED for multiple sites
 def get_video_options(video_url):
     video_info = extract_video_info(video_url)
     if not video_info:
@@ -213,6 +214,7 @@ async def process_video_quality(message, video_url, quality_label):
             screenshot_files = sorted(
                 [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
                 key=lambda x: int(x.split('_')[1].split('.')[0])
+            )
             
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                 media = []
@@ -291,7 +293,7 @@ def status_command(message):
 """
     bot.send_message(message.chat.id, status_msg, parse_mode="Markdown")
 
-# Start command - Updated with new site info
+# Start command - UPDATED with new site info
 @bot.message_handler(commands=['start'])
 def start_command(message):
     start_msg = """
@@ -323,7 +325,8 @@ Just send me a video URL from supported sites and I'll handle the rest!
 """
     bot.send_message(message.chat.id, start_msg, parse_mode="Markdown")
 
-# Handle video link - Updated with better URL matching
+
+# Handle video link - UPDATED regex pattern to be more inclusive
 @bot.message_handler(func=lambda msg: re.match(
     r"https?://(www\.)?(xhamster\.com|xhamster43\.desi|pornhub\.com|pornhub\.org|xnxx\.com|xvideos\.com)/", 
     msg.text.strip(),
@@ -360,6 +363,50 @@ def handle_link(msg):
     
     bot.send_message(msg.chat.id, f"🎬 *{title}*\nChoose a quality:", parse_mode="Markdown", reply_markup=markup)
 
+# Update extract_video_info to handle more URL patterns
+def extract_video_info(url):
+    # Normalize URL by removing www. if present
+    normalized_url = re.sub(r'https?://(www\.)?', 'https://', url, flags=re.IGNORECASE)
+    
+    # xHamster pattern (handles more variations)
+    xhamster_match = re.search(r"xhamster(43\.desi|\.com)/videos/([^\/]+)", normalized_url, re.IGNORECASE)
+    if xhamster_match:
+        domain = xhamster_match.group(1)
+        slug = xhamster_match.group(2)
+        return {
+            "type": "xhamster",
+            "url": f"https://xhamster{domain}/videos/{slug}"
+        }
+    
+    # PornHub pattern (handles more variations)
+    pornhub_match = re.search(r"pornhub\.(com|org)/view_video\.php\?viewkey=([a-z0-9]+)", normalized_url, re.IGNORECASE)
+    if pornhub_match:
+        domain = pornhub_match.group(1)
+        viewkey = pornhub_match.group(2)
+        return {
+            "type": "pornhub",
+            "url": f"https://www.pornhub.{domain}/view_video.php?viewkey={viewkey}"
+        }
+    
+    # XNXX pattern (handles more variations)
+    xnxx_match = re.search(r"xnxx\.com/(video-[a-z0-9]+/[^\/]+|videos?/[a-z0-9]+)", normalized_url, re.IGNORECASE)
+    if xnxx_match:
+        path = xnxx_match.group(1)
+        return {
+            "type": "xnxx",
+            "url": f"https://www.xnxx.com/{path}"
+        }
+    
+    # XVideos pattern (handles more variations)
+    xvideos_match = re.search(r"xvideos\.com/(video[0-9]+/[^\/]+|profiles/[^\/]+-.*/videos)", normalized_url, re.IGNORECASE)
+    if xvideos_match:
+        path = xvideos_match.group(1)
+        return {
+            "type": "xvideos",
+            "url": f"https://www.xvideos.com/{path}"
+        }
+    
+    return None
 # Handle button click
 @bot.callback_query_handler(func=lambda call: call.data.startswith("q:"))
 def handle_quality_choice(call):
