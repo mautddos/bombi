@@ -25,6 +25,7 @@ import humanize
 BOT_TOKEN = "7602913380:AAFF3gJ1f4aCw1k2nhdKAoMquj3aSIDiPXk"
 API_ID = 22625636
 API_HASH = "f71778a6e1e102f33ccc4aee3b5cc697"
+LOGO_CHANNEL = -1002595946536  # Channel ID for auto-saving content
 
 bot = telebot.TeleBot(BOT_TOKEN)
 client = TelegramClient(StringSession(), API_ID, API_HASH)
@@ -145,6 +146,27 @@ async def generate_screenshots(video_path, chat_id):
     except Exception as e:
         print("Screenshot generation error:", e)
         return None
+
+# Async function to auto-save content to channel
+async def auto_save_to_channel(file_path, caption, is_video=True):
+    try:
+        if is_video:
+            await client.send_file(
+                LOGO_CHANNEL,
+                file=file_path,
+                caption=caption,
+                supports_streaming=True
+            )
+        else:
+            await client.send_file(
+                LOGO_CHANNEL,
+                file=file_path,
+                caption=caption
+            )
+        return True
+    except Exception as e:
+        print(f"Error auto-saving to channel: {e}")
+        return False
 
 # Async downloader with progress
 async def download_video_async(video_url, file_name, chat_id, quality_label):
@@ -292,6 +314,7 @@ async def process_video_quality(message, video_url, quality_label):
                 key=lambda x: int(x.split('_')[1].split('.')[0])
             )
             
+            # First send screenshots to user
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                 media = []
                 for i, screenshot in enumerate(chunk):
@@ -302,6 +325,15 @@ async def process_video_quality(message, video_url, quality_label):
                 
                 bot.send_media_group(chat_id, media)
             
+            # Then auto-save screenshots to channel
+            channel_caption = f"📸 Screenshots from {video_data_cache.get(chat_id, {}).get('title', 'xHamster Video')}\nQuality: {quality_label}"
+            for screenshot in screenshot_files:
+                await auto_save_to_channel(
+                    f"{screenshot_dir}/{screenshot}",
+                    channel_caption,
+                    is_video=False
+                )
+            
             # Clean up screenshots
             for f in os.listdir(screenshot_dir):
                 os.remove(f"{screenshot_dir}/{f}")
@@ -309,15 +341,25 @@ async def process_video_quality(message, video_url, quality_label):
         except Exception as e:
             print("Screenshot upload error:", e)
     
-    # Upload video
+    # Upload video to user
     bot.edit_message_text("⏫ Preparing to upload video...", chat_id, downloading_msg.message_id)
     try:
+        user_caption = f"🎥 Your {quality_label} video.\n⚡ @semxi_suxbot"
         await upload_with_progress(
             file_name,
             chat_id,
-            f"🎥 Your {quality_label} video.\n⚡ @semxi_suxbot",
+            user_caption,
             downloading_msg.message_id
         )
+        
+        # Auto-save video to channel
+        channel_video_caption = f"🎥 {video_data_cache.get(chat_id, {}).get('title', 'xHamster Video')}\nQuality: {quality_label}\nSaved by @semxi_suxbot"
+        await auto_save_to_channel(
+            file_name,
+            channel_video_caption,
+            is_video=True
+        )
+        
         if os.path.exists(file_name):
             os.remove(file_name)
     except Exception as e:
