@@ -148,21 +148,31 @@ async def generate_screenshots(video_path, chat_id):
         return None
 
 # Async function to auto-save content to channel
-async def auto_save_to_channel(file_path, caption, is_video=True):
+async def auto_save_to_channel(file_paths, caption, is_video=False):
     try:
         if is_video:
+            # For video, send single file
             await client.send_file(
                 LOGO_CHANNEL,
-                file=file_path,
+                file=file_paths[0],
                 caption=caption,
                 supports_streaming=True
             )
         else:
-            await client.send_file(
-                LOGO_CHANNEL,
-                file=file_path,
-                caption=caption
-            )
+            # For screenshots, send as media groups
+            media = []
+            for i, file_path in enumerate(file_paths):
+                media.append(
+                    (file_path, caption if i == 0 else "")
+                )
+            
+            # Split into chunks of 10 (Telegram limit)
+            for chunk in [media[i:i+10] for i in range(0, len(media), 10)]:
+                await client.send_file(
+                    LOGO_CHANNEL,
+                    file=[item[0] for item in chunk],
+                    caption=chunk[0][1]
+                )
         return True
     except Exception as e:
         print(f"Error auto-saving to channel: {e}")
@@ -313,8 +323,9 @@ async def process_video_quality(message, video_url, quality_label):
                 [f for f in os.listdir(screenshot_dir) if f.endswith('.jpg')],
                 key=lambda x: int(x.split('_')[1].split('.')[0])
             )
+            screenshot_paths = [f"{screenshot_dir}/{f}" for f in screenshot_files]
             
-            # First send screenshots to user
+            # First send screenshots to user in groups of 10
             for chunk in [screenshot_files[i:i+10] for i in range(0, len(screenshot_files), 10)]:
                 media = []
                 for i, screenshot in enumerate(chunk):
@@ -322,17 +333,11 @@ async def process_video_quality(message, video_url, quality_label):
                         open(f"{screenshot_dir}/{screenshot}", 'rb'),
                         caption=f"Screenshot {i+1}" if i == 0 else ""
                     ))
-                
                 bot.send_media_group(chat_id, media)
             
-            # Then auto-save screenshots to channel
+            # Then auto-save screenshots to channel in media groups
             channel_caption = f"📸 Screenshots from {video_data_cache.get(chat_id, {}).get('title', 'xHamster Video')}\nQuality: {quality_label}"
-            for screenshot in screenshot_files:
-                await auto_save_to_channel(
-                    f"{screenshot_dir}/{screenshot}",
-                    channel_caption,
-                    is_video=False
-                )
+            await auto_save_to_channel(screenshot_paths, channel_caption)
             
             # Clean up screenshots
             for f in os.listdir(screenshot_dir):
@@ -354,11 +359,7 @@ async def process_video_quality(message, video_url, quality_label):
         
         # Auto-save video to channel
         channel_video_caption = f"🎥 {video_data_cache.get(chat_id, {}).get('title', 'xHamster Video')}\nQuality: {quality_label}\nSaved by @semxi_suxbot"
-        await auto_save_to_channel(
-            file_name,
-            channel_video_caption,
-            is_video=True
-        )
+        await auto_save_to_channel([file_name], channel_video_caption, is_video=True)
         
         if os.path.exists(file_name):
             os.remove(file_name)
