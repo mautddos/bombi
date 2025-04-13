@@ -190,7 +190,7 @@ def error_handler(update: Update, context: CallbackContext):
 def main():
     """Start the bot"""
     # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN, use_context=True)
+    updater = Updater(TOKEN)  # Removed use_context parameter
     dp = updater.dispatcher
 
     # Command handlers
