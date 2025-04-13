@@ -58,14 +58,33 @@ class InstagramChecker:
         return username.lower()
 
     def check_instagram(self, username):
-        """Check if username is available on Instagram"""
+        """Check if username is available on Instagram using multiple methods"""
+        try:
+            # First try the direct profile check
+            result = self.profile_check(username)
+            if result is not None:
+                return result
+                
+            # If unclear, try the API check
+            result = self.api_check(username)
+            if result is not None:
+                return result
+                
+            # If still unclear, try the signup check
+            return self.signup_check(username)
+            
+        except Exception as e:
+            logger.error(f"Error checking username {username}: {str(e)}")
+            return None
+
+    def profile_check(self, username):
+        """Check username availability by visiting profile page"""
         try:
             headers = {
                 'User-Agent': generate_user_agent(),
                 'Accept-Language': 'en-US,en;q=0.9',
             }
             
-            # First check - simple profile lookup
             response = requests.get(
                 f'https://www.instagram.com/{username}/',
                 headers=headers,
@@ -73,21 +92,17 @@ class InstagramChecker:
             )
             
             if response.status_code == 404:
-                # Profile doesn't exist - likely available
-                return True
+                return True  # Available
             elif response.status_code == 200:
-                # Profile exists
-                return False
-                
-            # If unclear, try API check
-            return self.api_check(username)
+                return False  # Taken
+            return None
             
         except Exception as e:
-            logger.error(f"Error checking username {username}: {str(e)}")
+            logger.error(f"Profile check failed for {username}: {str(e)}")
             return None
 
     def api_check(self, username):
-        """More advanced API check"""
+        """Check username availability through Instagram API"""
         try:
             csr = token_hex(8) * 2
             headers = {
@@ -108,10 +123,72 @@ class InstagramChecker:
                 timeout=REQUEST_TIMEOUT
             )
             
-            return response.status_code == 404
+            if response.status_code == 404:
+                return True  # Available
+            elif response.status_code == 200:
+                return False  # Taken
+            return None
             
         except Exception as e:
             logger.error(f"API check failed for {username}: {str(e)}")
+            return None
+
+    def signup_check(self, username):
+        """Check username availability through signup API (most reliable)"""
+        try:
+            csr = token_hex(8) * 2
+            uid = uuid4().hex.upper()
+            miid = token_hex(13).upper()
+
+            cookies = {
+                'csrftoken': csr,
+                'mid': miid,
+                'ig_did': uid,
+                'ig_nrcb': '1',
+            }
+
+            headers = {
+                'authority': 'www.instagram.com',
+                'accept': '*/*',
+                'accept-language': 'en-US,en;q=0.9',
+                'content-type': 'application/x-www-form-urlencoded',
+                'origin': 'https://www.instagram.com',
+                'referer': 'https://www.instagram.com/accounts/emailsignup/',
+                'user-agent': generate_user_agent(),
+                'x-asbd-id': '129477',
+                'x-csrftoken': csr,
+                'x-ig-app-id': '936619743392459',
+                'x-ig-www-claim': '0',
+            }
+
+            data = {
+                'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:randompassword',
+                'email': 'temp@example.com',
+                'first_name': 'Temp User',
+                'username': username,
+                'client_id': miid,
+                'seamless_login_enabled': '1',
+                'opt_into_one_tap': 'false',
+            }
+
+            response = requests.post(
+                'https://www.instagram.com/api/v1/web/accounts/web_create_ajax/attempt/',
+                cookies=cookies,
+                headers=headers,
+                data=data,
+                timeout=REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                response_data = response.json()
+                if 'dryrun_passed' in response_data and response_data['dryrun_passed']:
+                    return True  # Available
+                elif 'errors' in response_data and 'username_is_taken' in response_data['errors']:
+                    return False  # Taken
+            return None
+            
+        except Exception as e:
+            logger.error(f"Signup check failed for {username}: {str(e)}")
             return None
 
 def start(update: Update, context: CallbackContext) -> None:
@@ -189,8 +266,7 @@ def error_handler(update: Update, context: CallbackContext):
 
 def main():
     """Start the bot"""
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN)  # Removed use_context parameter
+    updater = Updater(TOKEN)
     dp = updater.dispatcher
 
     # Command handlers
@@ -203,10 +279,6 @@ def main():
 
     # Start the Bot
     updater.start_polling()
-
-    # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
-    # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 
 if __name__ == '__main__':
