@@ -18,9 +18,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-TOKEN = "7987107314:AAFFNznZhy9GH0CRkgB0MsKhhB1TY_mQb8Q"
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 CHANNEL_LINK = "https://t.me/YOUR_CHANNEL"
-ADMIN_ID = "8167507955"  # Your Telegram user ID for error notifications
+ADMIN_ID = "YOUR_ADMIN_ID"  # Your Telegram user ID for error notifications
 REQUEST_TIMEOUT = 10  # seconds
 MAX_WORKERS = 5  # For thread pool
 PROXY_LIST = []  # Optional: Add your proxy list here if needed
@@ -40,32 +40,32 @@ class InstagramChecker:
         self.num_chars = "0123456789"
         
     def generate_username(self, pattern):
-        """Generate username based on pattern with improved randomization"""
-        username = []
-        i = 0 
-        while i < len(pattern):
-            if pattern[i] == '#':
-                username.append(random.choice(self.all_chars + self.num_chars))
-            elif pattern[i] == '*':
-                username.append(random.choice(self.all_chars))
-            elif pattern[i] == '"':
-                username.append(random.choice(self.num_chars))
-            elif pattern[i] == '_':
-                username.append('_')
-            elif pattern[i] == '.':
-                username.append('.')
-            elif pattern[i:i+2] == '@@':
-                username.append(random.choice(self.all_chars) 
-                username.append(random.choice(self.all_chars))
-                i += 1
-            elif pattern[i:i+2] == '§§':
-                username.append(random.choice(self.num_chars))
-                username.append(random.choice(self.num_chars))
-                i += 1  
-            else:
-                username.append(pattern[i])
+    """Generate username based on pattern with improved randomization"""
+    username = []
+    i = 0 
+    while i < len(pattern):
+        if pattern[i] == '#':
+            username.append(random.choice(self.all_chars + self.num_chars))
+        elif pattern[i] == '*':
+            username.append(random.choice(self.all_chars))
+        elif pattern[i] == '"':
+            username.append(random.choice(self.num_chars))
+        elif pattern[i] == '_':
+            username.append('_')
+        elif pattern[i] == '.':
+            username.append('.')
+        elif pattern[i:i+2] == '@@':
+            username.append(random.choice(self.all_chars)) 
+            username.append(random.choice(self.all_chars))
             i += 1
-        return ''.join(username).lower()
+        elif pattern[i:i+2] == '§§':
+            username.append(random.choice(self.num_chars))
+            username.append(random.choice(self.num_chars))
+            i += 1  
+        else:
+            username.append(pattern[i])
+        i += 1
+    return ''.join(username).lower()
 
     def get_random_proxy(self):
         """Get random proxy if available"""
