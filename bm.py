@@ -233,7 +233,7 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
             if (current_time - last_update_time > 5 or 
                 (available_usernames and len(available_usernames) > previous_count)):
                 previous_count = len(available_usernames)
-                progress = min(100, int((len(available_usernames) / count) * 100)
+                progress = min(100, int((len(available_usernames) / count) * 100))
                 bars = int(progress / 10)
                 progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
                 
