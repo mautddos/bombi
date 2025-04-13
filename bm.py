@@ -222,10 +222,12 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
         
         available_usernames = []
         total_checked = 0
+        previous_count = 0
         
         while len(available_usernames) < count:
             # Update progress every 5 checks or when we find an available username
-            if total_checked % 5 == 0 or (available_usernames and len(available_usernames) > len(available_usernames) - 1:
+            if total_checked % 5 == 0 or (available_usernames and len(available_usernames) > previous_count):
+                previous_count = len(available_usernames)
                 progress = min(100, int((total_checked / (count * 3)) * 100))  # Estimate progress
                 bars = int(progress / 10)
                 progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
