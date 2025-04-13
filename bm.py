@@ -1,6 +1,7 @@
 import random
 import logging
 import requests
+import time
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 from concurrent.futures import ThreadPoolExecutor
@@ -200,6 +201,7 @@ def start(update: Update, context: CallbackContext) -> None:
         "🌟 Welcome to the Instagram Username Generator Bot! 🌟\n\n"
         "🔹 Use /gen to generate available Instagram usernames\n"
         "🔹 Use /gen5 to generate 5 usernames at once\n"
+        "🔹 Use /gen10 to generate 10 usernames at once\n"
         "🔹 Please join our channel for updates:",
         reply_markup=reply_markup
     )
@@ -215,44 +217,88 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
     ]
     
     try:
-        update.message.reply_text("🔍 Generating usernames... Please wait")
+        # Send initial message with progress bar
+        message = update.message.reply_text("🔍 Generating usernames...\n[░░░░░░░░░░] 0%")
         
-        results = []
-        for _ in range(count):
+        available_usernames = []
+        total_checked = 0
+        
+        while len(available_usernames) < count:
+            # Update progress every 5 checks or when we find an available username
+            if total_checked % 5 == 0 or (available_usernames and len(available_usernames) > len(available_usernames) - 1:
+                progress = min(100, int((total_checked / (count * 3)) * 100))  # Estimate progress
+                bars = int(progress / 10)
+                progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
+                
+                status_text = (
+                    f"🔍 Generating usernames...\n"
+                    f"{progress_bar}\n"
+                    f"✅ Found: {len(available_usernames)}/{count}\n"
+                    f"🔎 Checked: {total_checked}"
+                )
+                
+                try:
+                    context.bot.edit_message_text(
+                        chat_id=message.chat_id,
+                        message_id=message.message_id,
+                        text=status_text
+                    )
+                except:
+                    pass  # Skip edit if it fails
+            
             pattern = random.choice(patterns)
             username = checker.generate_username(pattern)
             is_available = checker.check_instagram(username)
+            total_checked += 1
             
-            if is_available is None:
-                results.append(f"⚠️ @{username} - Check failed")
-            elif is_available:
-                results.append(f"✅ @{username} - Available!")
+            if is_available is True:
+                available_usernames.append(username)
                 checker.available_count += 1
-            else:
-                results.append(f"❌ @{username} - Taken")
+            elif is_available is False:
                 checker.unavailable_count += 1
+            
+            # Don't check too many if we're not finding available ones
+            if total_checked > count * 10 and len(available_usernames) == 0:
+                break
         
-        # Send results
-        message = "📋 Username Generation Results:\n\n" + "\n".join(results)
-        message += f"\n\nStats: ✅ {checker.available_count} available | ❌ {checker.unavailable_count} taken"
-        update.message.reply_text(message[:4096])  # Telegram message limit
+        # Final results
+        if available_usernames:
+            result_message = "🎉 Available Usernames:\n\n" + "\n".join([f"✅ @{username}" for username in available_usernames[:count]])
+            result_message += f"\n\nStats: ✅ {len(available_usernames)} found | ❌ {checker.unavailable_count} taken | 🔎 {total_checked} checked"
+        else:
+            result_message = "😢 No available usernames found after checking many combinations. Try again!"
+        
+        # Edit the final message
+        try:
+            context.bot.edit_message_text(
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                text=result_message[:4096]  # Telegram message limit
+            )
+        except:
+            update.message.reply_text(result_message[:4096])
         
     except Exception as e:
         logger.error(f"Error in generate_usernames: {str(e)}")
         update.message.reply_text("❌ An error occurred. Please try again later.")
         # Notify admin
-        context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"🚨 Error in username generation:\n{str(e)}"
-        )
+        if ADMIN_ID:
+            context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 Error in username generation:\n{str(e)}"
+            )
 
 def gen(update: Update, context: CallbackContext):
     """Generate single username"""
     generate_usernames(update, context, count=1)
 
-def gen5(update: Update, context: CallbackContext):
+def gen5(update: Update, context: CallbackQueryHandler):
     """Generate 5 usernames"""
     generate_usernames(update, context, count=5)
+
+def gen10(update: Update, context: CallbackQueryHandler):
+    """Generate 10 usernames"""
+    generate_usernames(update, context, count=10)
 
 def error_handler(update: Update, context: CallbackContext):
     """Log errors and notify admin"""
@@ -273,6 +319,7 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("gen", gen))
     dp.add_handler(CommandHandler("gen5", gen5))
+    dp.add_handler(CommandHandler("gen10", gen10))
     
     # Error handler
     dp.add_error_handler(error_handler)
