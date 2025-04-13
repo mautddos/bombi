@@ -189,7 +189,8 @@ def error_handler(update: Update, context: CallbackContext):
 
 def main():
     """Start the bot"""
-    updater = Updater(TOKEN)  # Removed use_context parameter
+    # Create the Updater and pass it your bot's token.
+    updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
     # Command handlers
@@ -200,9 +201,12 @@ def main():
     # Error handler
     dp.add_error_handler(error_handler)
 
-    # Start bot
+    # Start the Bot
     updater.start_polling()
-    logger.info("Bot started and polling...")
+
+    # Run the bot until you press Ctrl-C or the process receives SIGINT,
+    # SIGTERM or SIGABRT. This should be used most of the time, since
+    # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 
 if __name__ == '__main__':
