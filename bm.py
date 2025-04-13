@@ -202,6 +202,7 @@ def start(update: Update, context: CallbackContext) -> None:
         "🔹 Use /gen to generate available Instagram usernames\n"
         "🔹 Use /gen5 to generate 5 usernames at once\n"
         "🔹 Use /gen10 to generate 10 usernames at once\n"
+        "🔹 Use /gen <number> to generate any number of usernames\n"
         "🔹 Please join our channel for updates:",
         reply_markup=reply_markup
     )
@@ -223,12 +224,16 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
         available_usernames = []
         total_checked = 0
         previous_count = 0
+        last_update_time = time.time()
         
+        # Keep checking until we find the desired number of usernames
         while len(available_usernames) < count:
             # Update progress every 5 checks or when we find an available username
-            if total_checked % 5 == 0 or (available_usernames and len(available_usernames) > previous_count):
+            current_time = time.time()
+            if (current_time - last_update_time > 5 or 
+                (available_usernames and len(available_usernames) > previous_count)):
                 previous_count = len(available_usernames)
-                progress = min(100, int((total_checked / (count * 3)) * 100))  # Estimate progress
+                progress = min(100, int((len(available_usernames) / count) * 100)
                 bars = int(progress / 10)
                 progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
                 
@@ -245,8 +250,9 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
                         message_id=message.message_id,
                         text=status_text
                     )
-                except:
-                    pass  # Skip edit if it fails
+                    last_update_time = current_time
+                except Exception as e:
+                    logger.error(f"Error updating progress: {str(e)}")
             
             pattern = random.choice(patterns)
             username = checker.generate_username(pattern)
@@ -259,9 +265,8 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
             elif is_available is False:
                 checker.unavailable_count += 1
             
-            # Don't check too many if we're not finding available ones
-            if total_checked > count * 10 and len(available_usernames) == 0:
-                break
+            # Add a small delay to avoid rate limiting
+            time.sleep(0.5)
         
         # Final results
         if available_usernames:
@@ -291,8 +296,23 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
             )
 
 def gen(update: Update, context: CallbackContext):
-    """Generate single username"""
-    generate_usernames(update, context, count=1)
+    """Handle /gen command with optional number parameter"""
+    try:
+        if context.args and context.args[0].isdigit():
+            count = int(context.args[0])
+            if count <= 0:
+                update.message.reply_text("Please enter a positive number (e.g. /gen 5)")
+                return
+            elif count > 50:
+                update.message.reply_text("Maximum limit is 50 usernames at once. Using 50.")
+                count = 50
+            generate_usernames(update, context, count=count)
+        else:
+            # Default to 1 if no number specified
+            generate_usernames(update, context, count=1)
+    except Exception as e:
+        logger.error(f"Error in gen command: {str(e)}")
+        update.message.reply_text("❌ Invalid command format. Use /gen <number> or just /gen for one username.")
 
 def gen5(update: Update, context: CallbackQueryHandler):
     """Generate 5 usernames"""
