@@ -1,326 +1,375 @@
 import random
-import os
-try:
-  import requests
-  import random
-  import threading
-  import time
-  from ms4 import UserAgentGenerator
-  from uuid import uuid4
-  from secrets import token_hex
-  from user_agent import generate_user_agent
-  from rich.console import Console
-  from rich.table import Table
-  from rich.text import Text
-except:
-	os.system("pip install ms4==2.10.0 rich")
-	
+import logging
 import requests
-import random
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor as tot
-from ms4 import UserAgentGenerator
-from user_agent import generate_user_agent
+import threading
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from secrets import token_hex
-from rich.console import Console
-from rich.table import Table
-from rich.text import Text
+from user_agent import generate_user_agent
 
-All = "qwertyuiopasdfghjklzxcvbnm"
-Num = "0123456789"
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-E = '\033[1;31m'
-X = '\033[1;33m'
-F = '\033[2;32m'
-M = '\x1b[1;37m'
-B = '\x1b[38;5;208m'
-memo = random.randint(100, 300)
-O = f'\x1b[38;5;{memo}m'
+# Configuration
+TOKEN = "7987107314:AAFFNznZhy9GH0CRkgB0MsKhhB1TY_mQb8Q"
+CHANNEL_LINK = "https://t.me/YOUR_CHANNEL"
+ADMIN_ID = "8167507955"  # Your Telegram user ID for error notifications
+REQUEST_TIMEOUT = 10  # seconds
+MAX_WORKERS = 5  # For thread pool
+PROXY_LIST = []  # Optional: Add your proxy list here if needed
 
-def nx():
-    os.system("clear")
-    Banner = f"""{B}{E}=============================={B}
-|{F}[+] YouTube    : {B}| أحمد الحراني 
-|{F}[+] TeleGram   : {B} maho_s9    
-|{F}[+] Instagram  : {B} ahmedalharrani 
-|{F}[+] Tool  : {B}Available Username IG |
-|{F}[+] sever  : {B} Web |
-{E}==============================
-"""
-    for mm in Banner.splitlines():
-        time.sleep(0.05)
-        print(mm)
-
-nx()
-
-token = input(f' {F}({M}1{F}) {M} Enter Token{F}  ' + O)
-print(X + ' ═════════════════════════════════  ')
-ID = input(f' {F}({M}2{F}) {M} Enter ID{F}  ' + O)
-
-console = Console()
-bb = 0
-gg = 0
-
-def Alhrrani(user, proxy):
-    global gg, bb
-    csr = token_hex(8) * 2
-    headers = {
-    'authority': 'www.instagram.com',
-    'accept': '*/*',
-    'accept-language': 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-    'content-type': 'application/x-www-form-urlencoded',
-    'origin': 'https://www.instagram.com',
-    'referer': 'https://www.instagram.com/accounts/login/?next=%2F&source=logged_out_homepage',
-    'sec-ch-prefers-color-scheme': 'light',
-    'sec-ch-ua': '"Not-A.Brand";v="99", "Chromium";v="124"',
-    'sec-ch-ua-full-version-list': '"Not-A.Brand";v="99.0.0.0", "Chromium";v="124.0.6327.4"',
-    'sec-ch-ua-mobile': '?1',
-    'sec-ch-ua-model': '"23127PN0CC"',
-    'sec-ch-ua-platform': '"Android"',
-    'sec-ch-ua-platform-version': '"11.0.0"',
-    'sec-fetch-dest': 'empty',
-    'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-origin',
-    'user-agent': generate_user_agent(),
-    'x-asbd-id': '129477',
-    'x-csrftoken': csr,
-    'x-ig-app-id': '1217981644879628',
-    'x-ig-www-claim': '0',
-    'x-instagram-ajax': '1016159378',
-    'x-requested-with': 'XMLHttpRequest',
-}
-
-    data = {
-    'enc_password': '#PWD_INSTAGRAM_BROWSER:10:1725333010:AdVQAIKFZ2bJpOIbQENgiygmpue333TXS56Z8NG253JS1LgjbV26LsUm/NuoCsYoNvEgHCTkGBmpCsx7KmPiTnur/Bqzb/hsjbj550lj1SiJEL8RkKyydce7O7cAYiTkAsaitYno1s045I/A5BU9KA==',
-    'loginAttemptSubmissionCount': '0',
-    'optIntoOneTap': 'false',
-    'queryParams': '{"next":"/","source":"logged_out_homepage"}',
-    'trustedDeviceRecords': '{}',
-    'username': user,
-}
-    try:
-      req = requests.post('https://www.instagram.com/api/v1/web/accounts/login/ajax/', headers=headers, data=data, proxies={'http': proxy}).text
-      if "showAccountRecoveryModal" in req:
-          bb += 1
-      else:
-          gg += 1
-          tlg = f'''
- Hi hunt Username INSTAGRAM
-⋘─────━*AHMED*━─────⋙
-Good Username : {user}
-Instagram ==√
-BY : @maho_s9 √ CH : @maho9s
-⋘─────━*AHMED*━─────⋙'''
-          print(F + tlg)
-          requests.post(f'https://api.telegram.org/bot{token}/sendMessage?chat_id={ID}&text={tlg}')
-    except:
-        bb += 1
-        pass
- 
-
-    
-def mahos(user, proxy):
-    global gg, bb
-    try:        
-        csr = token_hex(8) * 2
-        uid = uuid4().hex.upper()
-        miid = token_hex(13).upper()
-        dtr = token_hex(13)
-
-        cookies = {
-            'csrftoken': csr,
-            'dpr': '2.1988937854766846',
-            'ps_n': '0',
-            'ps_l': '0',
-            'mid': miid,
-            'ig_did': uid,
-            'datr': dtr,
-            'ig_nrcb': '1',
-        }
-
-        headers = {
-            'authority': 'www.instagram.com',
-            'accept': '*/*',
-            'accept-language': 'ar-YE,ar;q=0.9,en-YE;q=0.8,en-US;q=0.7,en;q=0.6',
-            'content-type': 'application/x-www-form-urlencoded',
-            'dpr': '2.19889',
-            'origin': 'https://www.instagram.com',
-            'referer': 'https://www.instagram.com/accounts/emailsignup/',
-            'sec-ch-prefers-color-scheme': 'dark',
-            'sec-ch-ua': '"Not)A;Brand";v="24", "Chromium";v="116"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-model': '""',
-            'sec-ch-ua-platform': '"Linux"',
-            'sec-ch-ua-platform-version': '""',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'user-agent': str(UserAgentGenerator()),
-            'viewport-width': '891',
-            'x-asbd-id': '129477',
-            'x-csrftoken': csr,
-            'x-ig-app-id': '936619743392459',
-            'x-ig-www-claim': '0',
-            'x-instagram-ajax': '1012280089',
-            'x-requested-with': 'XMLHttpRequest',
-        }
-
-        timestamp = str(time.time()).split('.')[0]
-        data = {
-           'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{timestamp}:mahos999',
-            'email': 'mahos@mahos.com',
-            'first_name': 'Ahmedalhrrani',
-            'username': user,
-            'client_id': miid,
-            'seamless_login_enabled': '1',
-            'opt_into_one_tap': 'false',
-        }
-
-        res = requests.post(
-            'https://www.instagram.com/api/v1/web/accounts/web_create_ajax/attempt/',
-            cookies=cookies,
-            headers=headers,
-            data=data,
-            proxies={'http': proxy}
-        ).text
-
-        if '"dryrun_passed":true,' in res:
-            gg += 1
-            tlg = f'''
- Hi hunt Username INSTAGRAM
-⋘─────━*AHMED*━─────⋙
-Good Username : {user}
-Instagram ==√
-BY : @maho_s9 √ CH : @maho9s
-⋘─────━*AHMED*━─────⋙'''
-            print(F + tlg)
-            requests.post(f'https://api.telegram.org/bot{token}/sendMessage?chat_id={ID}&text={tlg}')
-        elif '"errors"' in res and '"username_is_taken"' in res and '"dryrun_passed": false,' in res or 'username_has_special_char' in res:      
-            bb += 1
-        else:
-            bb += 1
-            Alhrrani(user, proxy)
-    except:
-        bb += 1    	
-        Alhrrani(user, proxy)
-        pass
-    	
+class InstagramChecker:
+    def __init__(self):
+        self.available_count = 0
+        self.unavailable_count = 0
+        self.executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        self.patterns = [
+            "#_#_#", "_#_#_", "##.##", "#.###", "##_##", "###__", "__###", 
+            "**.**", "@@_§§", "§§.@@", "§§_@@", "@@.§§", "_###_", '**_""', 
+            ".####", "#.#.#", "#_#.#", "#.#_#", "#.#_#", "##_##", "#_###", 
+            "###_#", "#.##_", "##.##", "#.##.#", "#_##.#"
+        ]
+        self.all_chars = "qwertyuiopasdfghjklzxcvbnm"
+        self.num_chars = "0123456789"
         
-
-def Ahmed(user, proxy):
-    global gg, bb
-    headers = {
-    'authority': 'www.instagram.com',
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'accept-language': 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-    'cache-control': 'max-age=0',
-    'dpr': '2.75',
-    'referer': f'https://www.instagram.com/{user}/',
-    'sec-ch-prefers-color-scheme': 'light',
-    'sec-ch-ua': '"Not-A.Brand";v="99", "Chromium";v="124"',
-    'sec-ch-ua-full-version-list': '"Not-A.Brand";v="99.0.0.0", "Chromium";v="124.0.6327.4"',
-    'sec-ch-ua-mobile': '?1',
-    'sec-ch-ua-model': '"23127PN0CC"',
-    'sec-ch-ua-platform': '"Android"',
-    'sec-ch-ua-platform-version': '"11.0.0"',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': 'same-origin',
-    'sec-fetch-user': '?1',
-    'upgrade-insecure-requests': '1',
-    'user-agent': generate_user_agent(),
-    'viewport-width': '980',
-}
-
-    try:
-      res = requests.get(f'https://www.instagram.com/{user}/', headers=headers, proxies={'http': proxy}).text
-      if "<title>Instagram</title>" in res:         
-          mahos(user, proxy)
-      elif "الملف الشخصي" in res and user in res or user in res:
-          bb += 1
-      else:
-          bb += 1
-          mahos(user, proxy)
-    except:
-        bb += 1
-        pass
-        
-    os.system('clear')
-    table = Table(title="Instagram username")
-    table.add_column("Type", justify="center", style="cyan", no_wrap=True)
-    table.add_column("Count", justify="center", style="magenta")
-    table.add_row("GoodInstaUser", str(gg), style="green")
-    table.add_row("BadInstaUser", str(bb), style="red")   
-    table.add_row("Username", user, style="white")
-    table.add_row("Dev", "AHMED ~~ @maho_s9")
-
-    console.print(table)
-
-def Gen(G):
-    usery = ''
-    i = 0 
-    while i < len(G):
-        if G[i] == '#':
-            usery += random.choice(All + Num)  
-        elif G[i] == '*':
-            usery += random.choice(All)  
-        elif G[i] == '"':
-            usery += random.choice(Num)
-        elif G[i] == '_':
-            usery += '_'  
-        elif G[i] == '.':
-            usery += '.'  
-        elif G[i:i+2] == '@@':
-            usery += random.choice(All) * 2 
+    def generate_username(self, pattern):
+        """Generate username based on pattern with improved randomization"""
+        username = []
+        i = 0 
+        while i < len(pattern):
+            if pattern[i] == '#':
+                username.append(random.choice(self.all_chars + self.num_chars))
+            elif pattern[i] == '*':
+                username.append(random.choice(self.all_chars))
+            elif pattern[i] == '"':
+                username.append(random.choice(self.num_chars))
+            elif pattern[i] == '_':
+                username.append('_')
+            elif pattern[i] == '.':
+                username.append('.')
+            elif pattern[i:i+2] == '@@':
+                username.append(random.choice(self.all_chars) 
+                username.append(random.choice(self.all_chars))
+                i += 1
+            elif pattern[i:i+2] == '§§':
+                username.append(random.choice(self.num_chars))
+                username.append(random.choice(self.num_chars))
+                i += 1  
+            else:
+                username.append(pattern[i])
             i += 1
-        elif G[i:i+2] == '§§':
-            usery += random.choice(Num) * 2  
-            i += 1  
-        else:
-            usery += G[i]
-        
-        i += 1  
-    
-    return usery
+        return ''.join(username).lower()
 
-Gs = [
-    "#_#_#",
-    "_#_#_",
-    "##.##",
-    "#.###",
-    "##_##",
-    "###__",
-    "__###",
-    "**.**",
-    "@@_§§",
-    "§§.@@",
-    "§§_@@",
-    "@@.§§",
-    "_###_",
-    '**_""',
-    ".####",
-    "#.#.#",
-    "#_#.#",
-    "#.#_#",
-    "#.#_#",
-    "##_##",
-    "#_###",
-    "###_#",
-    "#.##_",
-    "##.##",
-    "#.##.#",
-    "#_##.#"
-]
-with tot(max_workers=2) as los:
-  while True:
-    ah = random.choice(Gs)
-    user = Gen(ah)
-    ip = ".".join(str(random.randint(0, 255)) for _ in range(4))        
-    pl = [19, 20, 21, 22, 23, 24, 25, 80, 53, 111, 110, 443, 8080, 139, 445, 512, 513, 514, 4444, 2049, 1524, 3306, 5900]
-    port = random.choice(pl)
-    proxy = ip + ":" + str(port)        
-    los.submit(Ahmed, user, proxy)
+    def get_random_proxy(self):
+        """Get random proxy if available"""
+        if PROXY_LIST:
+            return random.choice(PROXY_LIST)
+        return None
+
+    def check_instagram(self, username):
+        """Check if username is available on Instagram using multiple methods"""
+        try:
+            # Try the most reliable method first (signup check)
+            result = self.signup_check(username)
+            if result is not None:
+                return result
+                
+            # If unclear, try the API check
+            result = self.api_check(username)
+            if result is not None:
+                return result
+                
+            # Finally try the profile check
+            return self.profile_check(username)
+            
+        except Exception as e:
+            logger.error(f"Error checking username {username}: {str(e)}")
+            return None
+
+    def profile_check(self, username):
+        """Check username availability by visiting profile page"""
+        try:
+            headers = {
+                'User-Agent': generate_user_agent(),
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            
+            proxies = {'http': self.get_random_proxy()} if self.get_random_proxy() else None
+            
+            response = requests.get(
+                f'https://www.instagram.com/{username}/',
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+                proxies=proxies
+            )
+            
+            if response.status_code == 404:
+                return True  # Available
+            elif response.status_code == 200:
+                return False  # Taken
+            return None
+            
+        except Exception as e:
+            logger.error(f"Profile check failed for {username}: {str(e)}")
+            return None
+
+    def api_check(self, username):
+        """Check username availability through Instagram API"""
+        try:
+            csr = token_hex(8) * 2
+            headers = {
+                'authority': 'www.instagram.com',
+                'accept': '*/*',
+                'accept-language': 'en-US,en;q=0.9',
+                'content-type': 'application/x-www-form-urlencoded',
+                'origin': 'https://www.instagram.com',
+                'referer': f'https://www.instagram.com/{username}/',
+                'user-agent': generate_user_agent(),
+                'x-csrftoken': csr,
+                'x-ig-app-id': '936619743392459',
+            }
+
+            proxies = {'http': self.get_random_proxy()} if self.get_random_proxy() else None
+            
+            response = requests.get(
+                f'https://www.instagram.com/api/v1/users/web_profile_info/?username={username}',
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+                proxies=proxies
+            )
+            
+            if response.status_code == 404:
+                return True  # Available
+            elif response.status_code == 200:
+                return False  # Taken
+            return None
+            
+        except Exception as e:
+            logger.error(f"API check failed for {username}: {str(e)}")
+            return None
+
+    def signup_check(self, username):
+        """Check username availability through signup API (most reliable)"""
+        try:
+            csr = token_hex(8) * 2
+            uid = uuid4().hex.upper()
+            miid = token_hex(13).upper()
+
+            cookies = {
+                'csrftoken': csr,
+                'mid': miid,
+                'ig_did': uid,
+                'ig_nrcb': '1',
+            }
+
+            headers = {
+                'authority': 'www.instagram.com',
+                'accept': '*/*',
+                'accept-language': 'en-US,en;q=0.9',
+                'content-type': 'application/x-www-form-urlencoded',
+                'origin': 'https://www.instagram.com',
+                'referer': 'https://www.instagram.com/accounts/emailsignup/',
+                'user-agent': generate_user_agent(),
+                'x-asbd-id': '129477',
+                'x-csrftoken': csr,
+                'x-ig-app-id': '936619743392459',
+                'x-ig-www-claim': '0',
+            }
+
+            data = {
+                'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:randompassword',
+                'email': 'temp@example.com',
+                'first_name': 'Temp User',
+                'username': username,
+                'client_id': miid,
+                'seamless_login_enabled': '1',
+                'opt_into_one_tap': 'false',
+            }
+
+            proxies = {'http': self.get_random_proxy()} if self.get_random_proxy() else None
+            
+            response = requests.post(
+                'https://www.instagram.com/api/v1/web/accounts/web_create_ajax/attempt/',
+                cookies=cookies,
+                headers=headers,
+                data=data,
+                timeout=REQUEST_TIMEOUT,
+                proxies=proxies
+            )
+
+            if response.status_code == 200:
+                response_data = response.json()
+                if response_data.get('dryrun_passed', False):
+                    return True  # Available
+                elif 'errors' in response_data and 'username_is_taken' in response_data['errors']:
+                    return False  # Taken
+            return None
+            
+        except Exception as e:
+            logger.error(f"Signup check failed for {username}: {str(e)}")
+            return None
+
+def start(update: Update, context: CallbackContext) -> None:
+    """Send welcome message with channel join button"""
+    keyboard = [[InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
+    update.message.reply_text(
+        "🌟 Welcome to the Instagram Username Generator Bot! 🌟\n\n"
+        "🔹 Use /gen to generate available Instagram usernames\n"
+        "🔹 Use /gen5 to generate 5 usernames at once\n"
+        "🔹 Use /gen10 to generate 10 usernames at once\n"
+        "🔹 Use /gen <number> to generate any number of usernames\n"
+        "🔹 Please join our channel for updates:",
+        reply_markup=reply_markup
+    )
+
+def generate_usernames(update: Update, context: CallbackContext, count=1):
+    """Generate and check Instagram usernames with improved logic"""
+    checker = InstagramChecker()
     
+    try:
+        # Send initial message with progress bar
+        message = update.message.reply_text("🔍 Generating usernames...\n[░░░░░░░░░░] 0%")
+        
+        available_usernames = []
+        total_checked = 0
+        last_update_time = time.time()
+        
+        # Keep checking until we find the desired number of usernames
+        while len(available_usernames) < count:
+            pattern = random.choice(checker.patterns)
+            username = checker.generate_username(pattern)
+            is_available = checker.check_instagram(username)
+            total_checked += 1
+            
+            if is_available is True:
+                available_usernames.append(username)
+                checker.available_count += 1
+                
+                # Notify immediately when a username is found
+                context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"✅ Found available username: @{username}"
+                )
+            elif is_available is False:
+                checker.unavailable_count += 1
+            
+            # Update progress every 5 seconds or when we find a username
+            current_time = time.time()
+            if current_time - last_update_time > 5 or is_available:
+                progress = min(100, int((len(available_usernames) / count) * 100)
+                bars = int(progress / 10)
+                progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
+                
+                status_text = (
+                    f"🔍 Generating usernames...\n"
+                    f"{progress_bar}\n"
+                    f"✅ Found: {len(available_usernames)}/{count}\n"
+                    f"🔎 Checked: {total_checked}"
+                )
+                
+                try:
+                    context.bot.edit_message_text(
+                        chat_id=message.chat_id,
+                        message_id=message.message_id,
+                        text=status_text
+                    )
+                    last_update_time = current_time
+                except Exception as e:
+                    logger.error(f"Error updating progress: {str(e)}")
+            
+            # Add a small delay to avoid rate limiting
+            time.sleep(random.uniform(0.3, 1.2))
+        
+        # Final results
+        if available_usernames:
+            result_message = "🎉 Available Usernames:\n\n" + "\n".join([f"✅ @{username}" for username in available_usernames[:count]])
+            result_message += f"\n\nStats: ✅ {len(available_usernames)} found | ❌ {checker.unavailable_count} taken | 🔎 {total_checked} checked"
+        else:
+            result_message = "😢 No available usernames found after checking many combinations. Try again!"
+        
+        # Edit the final message
+        try:
+            context.bot.edit_message_text(
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                text=result_message[:4096]  # Telegram message limit
+            )
+        except:
+            update.message.reply_text(result_message[:4096])
+        
+    except Exception as e:
+        logger.error(f"Error in generate_usernames: {str(e)}")
+        update.message.reply_text("❌ An error occurred. Please try again later.")
+        # Notify admin
+        if ADMIN_ID:
+            context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 Error in username generation:\n{str(e)}"
+            )
+
+def gen(update: Update, context: CallbackContext):
+    """Handle /gen command with optional number parameter"""
+    try:
+        if context.args and context.args[0].isdigit():
+            count = int(context.args[0])
+            if count <= 0:
+                update.message.reply_text("Please enter a positive number (e.g. /gen 5)")
+                return
+            elif count > 50:
+                update.message.reply_text("Maximum limit is 50 usernames at once. Using 50.")
+                count = 50
+            generate_usernames(update, context, count=count)
+        else:
+            # Default to 1 if no number specified
+            generate_usernames(update, context, count=1)
+    except Exception as e:
+        logger.error(f"Error in gen command: {str(e)}")
+        update.message.reply_text("❌ Invalid command format. Use /gen <number> or just /gen for one username.")
+
+def gen5(update: Update, context: CallbackQueryHandler):
+    """Generate 5 usernames"""
+    generate_usernames(update, context, count=5)
+
+def gen10(update: Update, context: CallbackQueryHandler):
+    """Generate 10 usernames"""
+    generate_usernames(update, context, count=10)
+
+def error_handler(update: Update, context: CallbackContext):
+    """Log errors and notify admin"""
+    logger.error(f"Update {update} caused error {context.error}")
+    
+    if ADMIN_ID:
+        context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"⚠️ Bot Error:\n{context.error}\n\nUpdate: {update}"
+        )
+
+def main():
+    """Start the bot"""
+    updater = Updater(TOKEN)
+    dp = updater.dispatcher
+
+    # Command handlers
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("gen", gen))
+    dp.add_handler(CommandHandler("gen5", gen5))
+    dp.add_handler(CommandHandler("gen10", gen10))
+    
+    # Error handler
+    dp.add_error_handler(error_handler)
+
+    # Start the Bot
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
