@@ -21,6 +21,7 @@ class InstagramAccountCreator:
         self.user_agent = self.generate_user_agent()
         self.headers = None
         self.cookies = None
+        self.device_id = f"android-{str(uuid.uuid4())[:16]}"
         
     def generate_user_agent(self):
         android_version = random.randint(9, 13)
@@ -31,111 +32,82 @@ class InstagramAccountCreator:
     def get_headers(self, country='US', language='en'):
         for _ in range(3):
             try:
+                # Initial headers to get cookies
                 temp_headers = {
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    'user-agent': self.user_agent,
+                    'accept-language': f'{language}-{country},en;q=0.9',
                 }
                 
                 self.session.headers.update(temp_headers)
-                ig_response = self.session.get(
-                    'https://www.instagram.com/api/v1/web/accounts/login/ajax/',
+                response = self.session.get(
+                    'https://www.instagram.com/accounts/emailsignup/',
                     timeout=30
                 )
                 
+                # Extract important cookies
                 self.cookies = {
-                    'csrftoken': ig_response.cookies.get('csrftoken', ''),
-                    'mid': ig_response.cookies.get('mid', ''),
+                    'csrftoken': response.cookies.get('csrftoken', str(uuid.uuid4()).replace('-', '')[:32]),
+                    'mid': response.cookies.get('mid', str(uuid.uuid4()).upper()),
+                    'ig_did': response.cookies.get('ig_did', str(uuid.uuid4())),
                     'ig_nrcb': '1',
-                    'ig_did': ig_response.cookies.get('ig_did', str(uuid.uuid4())),
                 }
                 
-                self.session.headers.update({'user-agent': self.user_agent})
+                # Get Facebook cookies
                 fb_response = self.session.get("https://www.facebook.com/", timeout=30)
-                
                 try:
                     js_datr = fb_response.text.split('["_js_datr","')[1].split('",')[0]
                     self.cookies['datr'] = js_datr
                 except:
                     self.cookies['datr'] = str(uuid.uuid4()).replace('-', '')[:20]
                 
+                # Build final headers
                 cookie_str = '; '.join(f'{k}={v}' for k, v in self.cookies.items())
-                
-                headers = {
-                    'authority': 'www.instagram.com',
-                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'accept-language': f'{language}-{country},en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'cookie': cookie_str,
-                    'user-agent': self.user_agent,
-                }
-                
-                response = self.session.get('https://www.instagram.com/', headers=headers, timeout=30)
-                
-                try:
-                    appid = response.text.split('APP_ID":"')[1].split('"')[0]
-                except:
-                    appid = '936619743392459'
-                
-                try:
-                    rollout = response.text.split('rollout_hash":"')[1].split('"')[0]
-                except:
-                    rollout = '1'
                 
                 self.headers = {
                     'authority': 'www.instagram.com',
                     'accept': '*/*',
-                    'accept-language': f'{language}-{country},en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'accept-language': f'{language}-{country},en;q=0.9',
                     'content-type': 'application/x-www-form-urlencoded',
                     'cookie': cookie_str,
                     'origin': 'https://www.instagram.com',
-                    'referer': 'https://www.instagram.com/accounts/signup/email/',
-                    'sec-ch-prefers-color-scheme': 'light',
-                    'sec-ch-ua': '"Chromium";v="111", "Not(A:Brand";v="8"',
+                    'referer': 'https://www.instagram.com/accounts/emailsignup/',
+                    'sec-ch-ua': '"Chromium";v="104", " Not A;Brand";v="99"',
                     'sec-ch-ua-mobile': '?1',
                     'sec-ch-ua-platform': '"Android"',
+                    'sec-fetch-dest': 'empty',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-site': 'same-origin',
                     'user-agent': self.user_agent,
                     'x-asbd-id': '198387',
                     'x-csrftoken': self.cookies['csrftoken'],
-                    'x-ig-app-id': str(appid),
+                    'x-ig-app-id': '1217981644879628',  # Updated app ID
                     'x-ig-www-claim': '0',
-                    'x-instagram-ajax': str(rollout),
+                    'x-instagram-ajax': '1007616494',
                     'x-requested-with': 'XMLHttpRequest',
-                    'x-web-device-id': self.cookies['ig_did'],
                 }
                 
                 return self.headers
                 
             except Exception as e:
+                print(f"Header generation error: {str(e)}")
                 time.sleep(2)
         
-        self.headers = {
-            'authority': 'www.instagram.com',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/x-www-form-urlencoded',
-            'origin': 'https://www.instagram.com',
-            'referer': 'https://www.instagram.com/accounts/signup/email/',
-            'sec-ch-ua': '"Chromium";v="111", "Not(A:Brand";v="8"',
-            'sec-ch-ua-mobile': '?1',
-            'sec-ch-ua-platform': '"Android"',
-            'user-agent': self.user_agent,
-            'x-asbd-id': '198387',
-            'x-csrftoken': self.cookies.get('csrftoken', 'missing'),
-            'x-ig-app-id': '936619743392459',
-            'x-ig-www-claim': '0',
-            'x-instagram-ajax': '1',
-            'x-requested-with': 'XMLHttpRequest',
-            'x-web-device-id': self.cookies.get('ig_did', str(uuid.uuid4())),
-        }
-        return self.headers
+        return None
+
+    def generate_random_name(self):
+        first_names = ["Emma", "Liam", "Olivia", "Noah", "Ava", "William", "Sophia", "James", "Isabella", "Oliver"]
+        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
+        return f"{random.choice(first_names)} {random.choice(last_names)}"
 
     def get_username_suggestions(self, name, email):
         for _ in range(3):
             try:
                 headers = self.headers.copy()
-                headers['referer'] = 'https://www.instagram.com/accounts/signup/birthday/'
+                headers['referer'] = 'https://www.instagram.com/accounts/signup/email/'
                 
                 data = {
                     'email': email,
-                    'name': name + str(random.randint(1, 99)),
+                    'name': name,
                 }
                 
                 response = self.session.post(
@@ -145,32 +117,40 @@ class InstagramAccountCreator:
                     timeout=30
                 )
                 
-                if response.status_code == 200 and 'suggestions' in response.json():
-                    return random.choice(response.json()['suggestions'])
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'suggestions' in data and data['suggestions']:
+                        return random.choice(data['suggestions'])
+                    return f"{name.lower().replace(' ', '')}{random.randint(100, 999)}"
                     
-            except Exception:
+            except Exception as e:
+                print(f"Username suggestion error: {str(e)}")
                 time.sleep(2)
         
-        return f"{name.lower()}{random.randint(100, 999)}"
+        return f"{name.lower().replace(' ', '')}{random.randint(100, 999)}"
 
     def send_verification_email(self, email):
         for _ in range(3):
             try:
+                headers = self.headers.copy()
+                headers['referer'] = 'https://www.instagram.com/accounts/emailsignup/'
+                
                 data = {
-                    'device_id': self.cookies['mid'],
+                    'device_id': self.device_id,
                     'email': email,
                 }
                 
                 response = self.session.post(
                     'https://www.instagram.com/api/v1/accounts/send_verify_email/',
-                    headers=self.headers,
+                    headers=headers,
                     data=data,
                     timeout=30
                 )
                 
                 return response.json()
                 
-            except Exception:
+            except Exception as e:
+                print(f"Verification email error: {str(e)}")
                 time.sleep(2)
         
         return {'status': 'fail', 'message': 'Failed to send verification email'}
@@ -179,11 +159,11 @@ class InstagramAccountCreator:
         for _ in range(3):
             try:
                 headers = self.headers.copy()
-                headers['referer'] = 'https://www.instagram.com/accounts/signup/emailConfirmation/'
+                headers['referer'] = 'https://www.instagram.com/accounts/signup/email_confirmation/'
                 
                 data = {
                     'code': code,
-                    'device_id': self.cookies['mid'],
+                    'device_id': self.device_id,
                     'email': email,
                 }
                 
@@ -196,7 +176,8 @@ class InstagramAccountCreator:
                 
                 return response.json()
                 
-            except Exception:
+            except Exception as e:
+                print(f"Verification code error: {str(e)}")
                 time.sleep(2)
         
         return {'status': 'fail', 'message': 'Failed to verify confirmation code'}
@@ -204,24 +185,25 @@ class InstagramAccountCreator:
     def create_account(self, email, signup_code):
         for _ in range(3):
             try:
-                firstname = names.get_first_name()
-                username = self.get_username_suggestions(firstname, email)
-                password = f"{firstname.strip()}@{random.randint(111, 999)}"
+                name = self.generate_random_name()
+                username = self.get_username_suggestions(name, email)
+                password = f"{name.split()[0].strip()}@{random.randint(1000, 9999)}"
                 
                 headers = self.headers.copy()
-                headers['referer'] = 'https://www.instagram.com/accounts/signup/username/'
+                headers['referer'] = 'https://www.instagram.com/accounts/signup/email/'
                 
                 data = {
-                    'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{round(time.time())}:{password}',
+                    'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:{password}',
                     'email': email,
                     'username': username,
-                    'first_name': firstname,
-                    'month': random.randint(1, 12),
-                    'day': random.randint(1, 28),
-                    'year': random.randint(1990, 2001),
-                    'client_id': self.cookies['mid'],
+                    'first_name': name,
+                    'month': str(random.randint(1, 12)),
+                    'day': str(random.randint(1, 28)),
+                    'year': str(random.randint(1990, 2001)),
+                    'client_id': self.device_id,
                     'seamless_login_enabled': '1',
-                    'tos_version': 'row',
+                    'opt_into_one_tap': 'false',
+                    'tos_version': 'eu',
                     'force_sign_up_code': signup_code,
                 }
                 
@@ -233,8 +215,9 @@ class InstagramAccountCreator:
                 )
                 
                 result = response.json()
+                print("Account creation response:", result)
                 
-                if result.get('account_created', False):
+                if result.get('account_created', False) or result.get('user_id'):
                     account_info = {
                         'username': username,
                         'password': password,
@@ -242,8 +225,12 @@ class InstagramAccountCreator:
                         'creation_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     }
                     return account_info
+                else:
+                    error_message = result.get('errors', {}).get('email', ['Unknown error'])[0]
+                    print(f"Account creation failed: {error_message}")
                     
-            except Exception:
+            except Exception as e:
+                print(f"Account creation error: {str(e)}")
                 time.sleep(2)
         
         return None
@@ -295,16 +282,19 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         try:
             # Get headers
             headers = creator.get_headers()
+            if not headers:
+                raise Exception("Failed to initialize Instagram session")
             
             # Send verification email
             send_result = creator.send_verification_email(message)
             
-            if send_result.get('email_sent', False):
-                update.message.reply_text("📧 Verification email sent! Please check your inbox and send me the verification code.")
+            if send_result.get('email_sent', False) or send_result.get('status') == 'ok':
+                update.message.reply_text("📧 Verification email sent! Please check your inbox and send me the 6-digit verification code.")
                 context.user_data['email'] = message
                 context.user_data['creator'] = creator
             else:
-                update.message.reply_text("❌ Failed to send verification email. Please try again later.")
+                error_msg = send_result.get('message', 'Unknown error')
+                update.message.reply_text(f"❌ Failed to send verification email: {error_msg}")
         except Exception as e:
             update.message.reply_text(f"❌ An error occurred: {str(e)}")
     elif message.isdigit() and len(message) == 6:  # Basic verification code check
@@ -315,8 +305,8 @@ def handle_message(update: Update, context: CallbackContext) -> None:
             # Verify code
             verify_result = creator.verify_confirmation_code(email, message)
             
-            if verify_result.get('status') == 'ok':
-                signup_code = verify_result.get('signup_code')
+            if verify_result.get('status') == 'ok' and 'signup_code' in verify_result:
+                signup_code = verify_result['signup_code']
                 
                 # Create account
                 account_info = creator.create_account(email, signup_code)
@@ -335,9 +325,10 @@ def handle_message(update: Update, context: CallbackContext) -> None:
 """
                     update.message.reply_text(success_message, parse_mode='Markdown')
                 else:
-                    update.message.reply_text("❌ Failed to create account. Please try again.")
+                    update.message.reply_text("❌ Failed to create account. Instagram might have detected automated activity. Try again later with a different email.")
             else:
-                update.message.reply_text(f"❌ Verification failed: {verify_result.get('message', 'Unknown error')}")
+                error_msg = verify_result.get('message', 'Invalid verification code')
+                update.message.reply_text(f"❌ Verification failed: {error_msg}")
         else:
             update.message.reply_text("❌ No email verification in progress. Please start over with /start")
     else:
