@@ -2,11 +2,10 @@ import os
 import random
 import requests
 import time
-from threading import Thread
+from threading import Thread, Lock
 from telegram import Bot, Update, InputFile
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from concurrent.futures import ThreadPoolExecutor
-from tqdm import tqdm
 
 # Bot Token from BotFather
 TOKEN = "8102265512:AAGXrXgWir3LxkHlN8jruWTdXh7hOo8yasM"
@@ -16,6 +15,10 @@ bot = Bot(token=TOKEN)
 
 # Proxy types for generation
 PROXY_TYPES = ['http', 'socks4', 'socks5']
+
+# For thread-safe progress tracking
+progress_lock = Lock()
+checking_status = {}
 
 def generate_proxy(proxy_type):
     """Generate a random proxy"""
@@ -37,7 +40,7 @@ def save_proxies_to_file(proxies, filename="proxies.txt"):
         f.write("\n".join(proxies))
     return filename
 
-def check_proxy(proxy):
+def check_proxy(proxy, chat_id):
     """Check if a proxy is working and get its info"""
     try:
         start_time = time.time()
@@ -50,6 +53,11 @@ def check_proxy(proxy):
         
         if response.status_code == 200:
             data = response.json()
+            
+            with progress_lock:
+                checking_status[chat_id]['working'] += 1
+                update_progress(chat_id)
+            
             return {
                 'proxy': proxy,
                 'status': 'Working',
@@ -64,21 +72,62 @@ def check_proxy(proxy):
     except Exception as e:
         pass
     
+    with progress_lock:
+        checking_status[chat_id]['dead'] += 1
+        update_progress(chat_id)
+    
     return {
         'proxy': proxy,
         'status': 'Dead'
     }
 
-def check_proxies_from_file(filename, progress_callback=None):
+def update_progress(chat_id):
+    """Update the progress message"""
+    status = checking_status[chat_id]
+    total = status['total']
+    checked = status['working'] + status['dead']
+    progress = int(checked / total * 20)  # 20 characters for progress bar
+    
+    progress_bar = "[" + "■" * progress + " " * (20 - progress) + "]"
+    text = (f"Checking proxies...\n"
+            f"{progress_bar} {checked}/{total}\n"
+            f"✅ Working: {status['working']}\n"
+            f"❌ Dead: {status['dead']}\n"
+            f"⏳ Remaining: {total - checked}")
+    
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status['progress_msg_id'],
+            text=text
+        )
+    except:
+        pass  # Message wasn't modified
+
+def check_proxies_from_file(filename, chat_id):
     """Check all proxies in a file"""
     with open(filename, 'r') as f:
         proxies = [line.strip() for line in f.readlines() if line.strip()]
     
+    # Initialize progress tracking
+    with progress_lock:
+        checking_status[chat_id] = {
+            'total': len(proxies),
+            'working': 0,
+            'dead': 0,
+            'progress_msg_id': None
+        }
+    
+    # Send initial progress message
+    msg = bot.send_message(chat_id, "Starting proxy check...")
+    with progress_lock:
+        checking_status[chat_id]['progress_msg_id'] = msg.message_id
+    
     working_proxies = []
-    total = len(proxies)
     
     with ThreadPoolExecutor(max_workers=50) as executor:
-        results = list(tqdm(executor.map(check_proxy, proxies), total=total))
+        # Map each proxy to the check_proxy function
+        results = list(executor.map(lambda p: check_proxy(p, chat_id), proxies))
     
     working_proxies = [result for result in results if result['status'] == 'Working']
     
@@ -100,7 +149,11 @@ def check_proxies_from_file(filename, progress_callback=None):
             else:
                 f.write(f"Proxy: {proxy['proxy']} - Status: {proxy['status']}\n\n")
     
-    return result_filename, len(working_proxies), total
+    # Clean up progress tracking
+    with progress_lock:
+        del checking_status[chat_id]
+    
+    return result_filename, len(working_proxies), len(proxies)
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -156,33 +209,27 @@ def handle_document(update: Update, context: CallbackContext):
     filename = update.message.document.file_name
     file.download(filename)
     
-    # Send processing message
-    processing_msg = update.message.reply_text("Checking proxies, please wait...")
-    
     # Check proxies in a separate thread to avoid blocking
     def check_and_send_results():
+        chat_id = update.message.chat_id
         try:
-            result_filename, working, total = check_proxies_from_file(filename)
+            result_filename, working, total = check_proxies_from_file(filename, chat_id)
             
             # Send results
             with open(result_filename, 'rb') as f:
                 update.message.reply_document(
                     document=InputFile(f),
-                    caption=f"Results: {working}/{total} proxies working"
+                    caption=f"✅ Check complete!\nWorking: {working}\nDead: {total - working}\nSuccess rate: {working/total*100:.1f}%"
                 )
             
             # Clean up
             os.remove(filename)
             os.remove(result_filename)
             
-            # Delete processing message
-            context.bot.delete_message(
-                chat_id=processing_msg.chat_id,
-                message_id=processing_msg.message_id
-            )
-            
         except Exception as e:
             update.message.reply_text(f"Error: {str(e)}")
+            if os.path.exists(filename):
+                os.remove(filename)
     
     Thread(target=check_and_send_results).start()
 
