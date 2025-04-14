@@ -1,6 +1,6 @@
 import logging
-from telegram import Update, Sticker, BotCommand
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, BotCommand
+from telegram.ext import Updater, CommandHandler, CallbackContext
 import asyncio
 
 # Configure logging
@@ -17,13 +17,13 @@ TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"
 STICKER_PACK_NAME = "celebsex"
 STICKER_COUNT = 10  # Update this with the actual number of stickers in the pack
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def start(update: Update, context: CallbackContext) -> None:
     """Send all stickers from the specified pack when /start is received."""
     user = update.effective_user
     logger.info(f"User {user.id} started the bot")
     
     # Send a message first
-    await update.message.reply_text(
+    update.message.reply_text(
         f"Hi {user.first_name}! Sending stickers from the pack...",
     )
     
@@ -31,28 +31,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for i in range(1, STICKER_COUNT + 1):
         sticker_id = f"CAACAgIAAxkBAAEL{STICKER_PACK_NAME}{i:02d}"  # This is a simplified format
         try:
-            await update.message.reply_sticker(sticker=sticker_id)
-            await asyncio.sleep(0.5)  # Small delay to avoid rate limiting
+            update.message.reply_sticker(sticker=sticker_id)
         except Exception as e:
             logger.error(f"Error sending sticker {i}: {e}")
             continue
 
-async def post_init(application: Application) -> None:
-    """Post initialization - set bot commands."""
-    await application.bot.set_my_commands([
-        BotCommand("start", "Get all stickers from the pack"),
-    ])
-
 def main() -> None:
     """Start the bot."""
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(TOKEN).post_init(post_init).build()
+    # Create the Updater and pass it your bot's token.
+    updater = Updater(TOKEN, use_context=True)
+
+    # Get the dispatcher to register handlers
+    dp = updater.dispatcher
 
     # on different commands - answer in Telegram
-    application.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("start", start))
 
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start the Bot
+    updater.start_polling()
+
+    # Run the bot until you press Ctrl-C or the process receives SIGINT,
+    # SIGTERM or SIGABRT. This should be used most of the time, since
+    # start_polling() is non-blocking and will stop the bot gracefully.
+    updater.idle()
 
 if __name__ == "__main__":
     main()
