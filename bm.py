@@ -1,52 +1,90 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 
+BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
+CHANNEL_ID = -1002441094491
+
+# Store user progress
+user_progress = {}
+
 def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
         [InlineKeyboardButton("Dasi", callback_data='dasi')],
         [InlineKeyboardButton("Vidasi", callback_data='vidasi')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Please choose:', reply_markup=reply_markup)
+    if update.message:
+        update.message.reply_text('Please choose:', reply_markup=reply_markup)
+    else:
+        update.callback_query.edit_message_text('Please choose:', reply_markup=reply_markup)
 
 def button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    user_id = query.from_user.id
 
     if query.data == 'dasi':
         keyboard = [
             [InlineKeyboardButton("Normal", callback_data='normal')],
             [InlineKeyboardButton("Leak", callback_data='leak')],
-            [
-                InlineKeyboardButton("Back", callback_data='back'),
-                InlineKeyboardButton("Next", callback_data='next')
-            ]
+            [InlineKeyboardButton("Back", callback_data='back')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         query.edit_message_text(text="Dasi options:", reply_markup=reply_markup)
-    elif query.data == 'vidasi':
-        # Add similar functionality for Vidasi if needed
-        pass
+    
+    elif query.data == 'normal':
+        # Initialize or reset user progress
+        user_progress[user_id] = {'last_sent': 0, 'mode': 'normal'}
+        send_batch(user_id, query)
+    
+    elif query.data == 'next_normal':
+        send_batch(user_id, query)
+    
     elif query.data == 'back':
-        # Go back to the main menu
-        keyboard = [
-            [InlineKeyboardButton("Dasi", callback_data='dasi')],
-            [InlineKeyboardButton("Vidasi", callback_data='vidasi')]
-        ]
+        start(update, context)
+
+def send_batch(user_id, query):
+    if user_id not in user_progress:
+        user_progress[user_id] = {'last_sent': 0, 'mode': 'normal'}
+    
+    start_msg = user_progress[user_id]['last_sent']
+    end_msg = start_msg + 10
+    sent_count = 0
+    
+    for msg_id in range(start_msg + 1, end_msg + 1):
+        try:
+            query.bot.copy_message(
+                chat_id=query.message.chat.id,
+                from_chat_id=CHANNEL_ID,
+                message_id=msg_id
+            )
+            sent_count += 1
+        except Exception as e:
+            print(f"Failed to copy message {msg_id}: {e}")
+    
+    if sent_count > 0:
+        user_progress[user_id]['last_sent'] = end_msg
+        
+        # Add Next button if there are more messages
+        keyboard = [[InlineKeyboardButton("Next", callback_data='next_normal')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text='Please choose:', reply_markup=reply_markup)
-    elif query.data == 'next':
-        # Add functionality for next button
-        query.edit_message_text(text="Next button pressed")
-    elif query.data in ['normal', 'leak']:
-        query.edit_message_text(text=f"You selected {query.data}")
+        query.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
+            reply_markup=reply_markup
+        )
+    else:
+        query.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="No more videos available or failed to send."
+        )
 
 def main() -> None:
-    # Replace 'YOUR_TOKEN' with your actual bot token
-    updater = Updater("8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38")
+    updater = Updater(BOT_TOKEN)
+    dispatcher = updater.dispatcher
 
-    updater.dispatcher.add_handler(CommandHandler('start', start))
-    updater.dispatcher.add_handler(CallbackQueryHandler(button))
+    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(CallbackQueryHandler(button))
 
     updater.start_polling()
     updater.idle()
