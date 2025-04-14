@@ -1,100 +1,63 @@
-import logging
-import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import os
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-# Setup logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+# Video URLs array
+VIDEOS = [
+    "https://t.me/botstomp/21?single",
+    "https://t.me/botstomp/22?single",
+    "https://t.me/botstomp/23?single",
+    "https://t.me/botstomp/24?single",
+    "https://t.me/botstomp/25?single",
+    "https://t.me/botstomp/26?single",
+    "https://t.me/botstomp/27?single",
+    "https://t.me/botstomp/28?single",
+    "https://t.me/botstomp/29?single",
+    "https://t.me/botstomp/30?single"
+]
+
+# Main menu keyboard
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        ["Dasi test🍊", "Dasi mms🍊"],
+        ["back to main"]
+    ],
+    resize_keyboard=True
 )
-logger = logging.getLogger(__name__)
 
-# Bot configuration - REPLACE WITH NEW TOKEN!
-BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"  # ⚠️ REVOKE THIS TOKEN!
-VIDEO_LINK = "https://t.me/botstomp/123"
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send welcome message with buttons"""
-    user = update.effective_user
-    welcome_msg = f"""
-🌟 *Welcome {user.first_name}!* 🌟
-
-Choose an option below:
-
-🔹 *SU* - Super Utility
-🔹 *PU* - Premium Utility
-🔹 *CU* - Common Utility
-"""
-
-    buttons = [
-        [InlineKeyboardButton("SU", callback_data="su"),
-         InlineKeyboardButton("PU", callback_data="pu")],
-        [InlineKeyboardButton("CU", callback_data="cu"),
-         InlineKeyboardButton("Back", callback_data="back")]
-    ]
-    
-    await update.message.reply_text(
-        welcome_msg,
-        reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode="Markdown"
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "* tharki bot *",
+        parse_mode='Markdown',
+        reply_markup=MAIN_KEYBOARD
     )
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle button presses"""
-    query = update.callback_query
-    await query.answer()
-    
-    button_responses = {
-        "su": "🎉 Super Utility video:",
-        "pu": "💎 Premium Utility video:",
-        "cu": "🛠 Common Utility video:",
-        "back": "🔙 Returning to main menu..."
-    }
-    
-    response = button_responses.get(query.data)
-    
-    if query.data == "back":
-        await start(update, context)
-    else:
-        await context.bot.send_video(
-            chat_id=query.message.chat_id,
-            video=VIDEO_LINK,
-            caption=response,
-            parse_mode="Markdown"
-        )
-        
-        buttons = [
-            [InlineKeyboardButton("SU", callback_data="su"),
-             InlineKeyboardButton("PU", callback_data="pu")],
-            [InlineKeyboardButton("CU", callback_data="cu"),
-             InlineKeyboardButton("Back", callback_data="back")]
-        ]
-        await query.message.reply_text(
-            "Choose another option:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+def send_videos(update: Update, context: CallbackContext) -> None:
+    chat_id = update.message.chat_id
+    for video in VIDEOS:
+        context.bot.send_video(chat_id=chat_id, video=video)
+
+def handle_message(update: Update, context: CallbackContext) -> None:
+    text = update.message.text
+    if text in ["Dasi test🍊", "Dasi mms🍊"]:
+        send_videos(update, context)
+    elif text == "back to main":
+        start(update, context)
 
 def main() -> None:
-    """Start the bot"""
-    try:
-        # Create Application with explicit timezone
-        app = Application.builder() \
-            .token(BOT_TOKEN) \
-            .arbitrary_callback_data(True) \
-            .post_init(lambda app: app.job_queue.scheduler.configure(timezone=pytz.UTC)) \
-            .build()
-        
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CallbackQueryHandler(handle_buttons))
-        
-        logger.info("Starting bot...")
-        app.run_polling()
-        
-    except Exception as e:
-        logger.error(f"Bot failed: {e}")
+    # Get the token from environment variable or replace with your token
+    TOKEN = os.getenv('8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38')
+    
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
 
-if __name__ == "__main__":
-    # First install required packages:
-    # pip install python-telegram-bot pytz
+    # Add handlers
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+
+    # Start the Bot
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
     main()
