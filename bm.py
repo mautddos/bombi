@@ -1,15 +1,18 @@
 import logging
+import pytz  # Import pytz for timezone support
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 # Telegram video link
 VIDEO_LINK = "https://t.me/botstomp/123"
+BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  # Replace with your actual token
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send an attractive start message with buttons when the command /start is issued."""
@@ -74,7 +77,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text=response_text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(
+            text=response_text, 
+            reply_markup=reply_markup, 
+            parse_mode="Markdown"
+        )
     else:
         # For SU, PU, CU buttons - send the video
         await context.bot.send_video(
@@ -103,8 +110,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Run the bot."""
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token("8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA").build()
+    # Create the Application with explicit timezone
+    application = Application.builder() \
+        .token(BOT_TOKEN) \
+        .build()
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
@@ -113,7 +122,4 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(button))
 
     # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+    application.
