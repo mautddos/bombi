@@ -41,36 +41,44 @@ def save_proxies_to_file(proxies, filename="proxies.txt"):
     return filename
 
 def check_proxy(proxy, chat_id):
-    """Check if a proxy is working and get its info"""
-    try:
-        start_time = time.time()
-        response = requests.get(
-            'http://ipinfo.io/json',
-            proxies={'http': proxy, 'https': proxy},
-            timeout=10
-        )
-        latency = int((time.time() - start_time) * 1000)  # in ms
-        
-        if response.status_code == 200:
-            data = response.json()
+    """Enhanced proxy checking with multiple test sites"""
+    test_urls = [
+        'http://ipinfo.io/json',
+        'http://httpbin.org/ip',
+        'http://api.ipify.org?format=json'
+    ]
+    
+    for url in test_urls:
+        try:
+            start_time = time.time()
+            response = requests.get(
+                url,
+                proxies={'http': proxy, 'https': proxy},
+                timeout=15
+            )
+            latency = int((time.time() - start_time) * 1000)  # in ms
             
-            with progress_lock:
-                checking_status[chat_id]['working'] += 1
-                update_progress(chat_id)
-            
-            return {
-                'proxy': proxy,
-                'status': 'Working',
-                'ip': data.get('ip', 'N/A'),
-                'country': data.get('country', 'N/A'),
-                'region': data.get('region', 'N/A'),
-                'city': data.get('city', 'N/A'),
-                'org': data.get('org', 'N/A'),
-                'timezone': data.get('timezone', 'N/A'),
-                'latency': f"{latency}ms"
-            }
-    except Exception as e:
-        pass
+            if response.status_code == 200:
+                data = response.json()
+                
+                with progress_lock:
+                    checking_status[chat_id]['working'] += 1
+                    update_progress(chat_id)
+                
+                return {
+                    'proxy': proxy,
+                    'status': 'Working',
+                    'ip': data.get('ip', 'N/A'),
+                    'country': data.get('country', 'N/A'),
+                    'region': data.get('region', 'N/A'),
+                    'city': data.get('city', 'N/A'),
+                    'org': data.get('org', 'N/A'),
+                    'timezone': data.get('timezone', 'N/A'),
+                    'latency': f"{latency}ms",
+                    'test_url': url
+                }
+        except:
+            continue
     
     with progress_lock:
         checking_status[chat_id]['dead'] += 1
