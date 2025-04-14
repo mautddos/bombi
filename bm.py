@@ -1,64 +1,54 @@
-import os
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext, Filters
-
-# Channel & video info
-CHANNEL_ID = "-1002441094491"  # Channel ID
-MESSAGE_ID = 8889              # The message ID of the video
-
-# Custom keyboard
-MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    [
-        ["Get Video🎬"],
-        ["Help❓", "Aboutℹ️"]
-    ],
-    resize_keyboard=True
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 
 def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text(
-        "✨ Welcome to the Video Bot! ✨\n"
-        "Press 'Get Video🎬' to receive the content.",
-        reply_markup=MAIN_KEYBOARD
-    )
+    keyboard = [
+        [InlineKeyboardButton("Dasi", callback_data='dasi')],
+        [InlineKeyboardButton("Vidasi", callback_data='vidasi')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text('Please choose:', reply_markup=reply_markup)
 
-def send_video(update: Update, context: CallbackContext) -> None:
-    try:
-        # Get original video message from channel
-        original_msg = context.bot.get_chat(CHANNEL_ID).get_message(MESSAGE_ID)
-        
-        # Send as fresh upload (no forward tag)
-        context.bot.send_video(
-            chat_id=update.message.chat_id,
-            video=original_msg.video.file_id,
-            caption="Here’s your video 🎬",
-            supports_streaming=True
-        )
+def button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
 
-    except Exception as e:
-        print(f"Error sending video: {e}")
-        update.message.reply_text("Couldn't send video. Make sure bot is admin in the channel and video is accessible.")
-
-def handle_message(update: Update, context: CallbackContext) -> None:
-    text = update.message.text
-    if text == "Get Video🎬":
-        send_video(update, context)
-    elif text == "Help❓":
-        update.message.reply_text("Just press 'Get Video🎬' to receive the content.")
-    elif text == "Aboutℹ️":
-        update.message.reply_text("This bot provides exclusive video content.")
+    if query.data == 'dasi':
+        keyboard = [
+            [InlineKeyboardButton("Normal", callback_data='normal')],
+            [InlineKeyboardButton("Leak", callback_data='leak')],
+            [
+                InlineKeyboardButton("Back", callback_data='back'),
+                InlineKeyboardButton("Next", callback_data='next')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Dasi options:", reply_markup=reply_markup)
+    elif query.data == 'vidasi':
+        # Add similar functionality for Vidasi if needed
+        pass
+    elif query.data == 'back':
+        # Go back to the main menu
+        keyboard = [
+            [InlineKeyboardButton("Dasi", callback_data='dasi')],
+            [InlineKeyboardButton("Vidasi", callback_data='vidasi')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text='Please choose:', reply_markup=reply_markup)
+    elif query.data == 'next':
+        # Add functionality for next button
+        query.edit_message_text(text="Next button pressed")
+    elif query.data in ['normal', 'leak']:
+        query.edit_message_text(text=f"You selected {query.data}")
 
 def main() -> None:
-    TOKEN = os.getenv('TELEGRAM_TOKEN') or '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38'
+    # Replace 'YOUR_TOKEN' with your actual bot token
+    updater = Updater("8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38")
 
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    updater.dispatcher.add_handler(CommandHandler('start', start))
+    updater.dispatcher.add_handler(CallbackQueryHandler(button))
 
     updater.start_polling()
-    print("✅ Bot is running...")
     updater.idle()
 
 if __name__ == '__main__':
