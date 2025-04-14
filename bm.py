@@ -1,4 +1,5 @@
 import logging
+import pytz  # Required for timezone support
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -9,8 +10,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot configuration
-BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  # REPLACE THIS WITH NEW TOKEN AFTER TESTING
+# Bot configuration - REPLACE WITH NEW TOKEN AFTER TESTING!
+BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  
 VIDEO_LINK = "https://t.me/botstomp/123"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -27,14 +28,10 @@ Choose an option below:
 """
 
     buttons = [
-        [
-            InlineKeyboardButton("SU", callback_data="su"),
-            InlineKeyboardButton("PU", callback_data="pu"),
-        ],
-        [
-            InlineKeyboardButton("CU", callback_data="cu"),
-            InlineKeyboardButton("Back", callback_data="back"),
-        ]
+        [InlineKeyboardButton("SU", callback_data="su"),
+         InlineKeyboardButton("PU", callback_data="pu")],
+        [InlineKeyboardButton("CU", callback_data="cu"),
+         InlineKeyboardButton("Back", callback_data="back")]
     ]
     
     await update.message.reply_text(
@@ -55,7 +52,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "back": "🔙 Returning to main menu..."
     }
     
-    response = button_responses.get(query.data, "Invalid option")
+    response = button_responses.get(query.data)
     
     if query.data == "back":
         await start(update, context)
@@ -70,14 +67,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Show buttons again
         buttons = [
-            [
-                InlineKeyboardButton("SU", callback_data="su"),
-                InlineKeyboardButton("PU", callback_data="pu"),
-            ],
-            [
-                InlineKeyboardButton("CU", callback_data="cu"),
-                InlineKeyboardButton("Back", callback_data="back"),
-            ]
+            [InlineKeyboardButton("SU", callback_data="su"),
+             InlineKeyboardButton("PU", callback_data="pu")],
+            [InlineKeyboardButton("CU", callback_data="cu"),
+             InlineKeyboardButton("Back", callback_data="back")]
         ]
         await query.message.reply_text(
             "Choose another option:",
@@ -87,19 +80,23 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def main() -> None:
     """Start the bot"""
     try:
-        # Create Application instance
-        app = Application.builder().token(BOT_TOKEN).build()
+        # Create Application with explicit timezone
+        app = Application.builder() \
+            .token(BOT_TOKEN) \
+            .arbitrary_callback_data(True) \
+            .build()
         
         # Add handlers
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CallbackQueryHandler(handle_buttons))
         
-        # Run bot
-        logger.info("Bot is running...")
+        logger.info("Starting bot...")
         app.run_polling()
         
     except Exception as e:
-        logger.error(f"Bot error: {e}")
+        logger.error(f"Bot failed: {e}")
 
 if __name__ == "__main__":
+    # Install required packages first:
+    # pip install python-telegram-bot pytz
     main()
