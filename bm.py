@@ -1,7 +1,7 @@
 import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext
-from telegram.ext import filters  # Note: lowercase 'filters' in v20+
+from telegram.ext import Filters  # Note: uppercase Filters for v13.x
 
 # Video URLs array
 VIDEOS = [
@@ -38,7 +38,10 @@ def start(update: Update, context: CallbackContext) -> None:
 def send_videos(update: Update, context: CallbackContext) -> None:
     chat_id = update.message.chat_id
     for video in VIDEOS:
-        context.bot.send_video(chat_id=chat_id, video=video)
+        try:
+            context.bot.send_video(chat_id=chat_id, video=video)
+        except Exception as e:
+            print(f"Failed to send video: {e}")
 
 def handle_message(update: Update, context: CallbackContext) -> None:
     text = update.message.text
@@ -50,11 +53,13 @@ def handle_message(update: Update, context: CallbackContext) -> None:
 def main() -> None:
     TOKEN = os.getenv('TELEGRAM_TOKEN') or '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38'
     
-    updater = Updater(TOKEN)
+    # For v13.x, use_context=True is required
+    updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
+    # Correct filter syntax for v13.x
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
     updater.start_polling()
     print("✅ Bot is running...")
