@@ -1,9 +1,9 @@
 import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext
-from telegram.ext import filters
+from telegram.ext import filters  # Note: lowercase 'filters' in v20+
 
-# Updated Video URLs array
+# Video URLs array
 VIDEOS = [
     "https://t.me/botstomp/21?single",
     "https://t.me/botstomp/22?single",
@@ -19,7 +19,7 @@ VIDEOS = [
     "https://t.me/botstomp/30?single"
 ]
 
-# Updated Main menu keyboard with more buttons
+# Main menu keyboard
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["Dasi test🍊", "Dasi mms🍊"],
@@ -31,19 +31,14 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 def start(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(
-        "🌟 Welcome to the Video Bot! 🌟\n"
-        "Choose an option below:",
-        parse_mode='Markdown',
+        "🌟 Welcome to the Video Bot! 🌟",
         reply_markup=MAIN_KEYBOARD
     )
 
 def send_videos(update: Update, context: CallbackContext) -> None:
     chat_id = update.message.chat_id
     for video in VIDEOS:
-        try:
-            context.bot.send_video(chat_id=chat_id, video=video)
-        except Exception as e:
-            print(f"Error sending video {video}: {e}")
+        context.bot.send_video(chat_id=chat_id, video=video)
 
 def handle_message(update: Update, context: CallbackContext) -> None:
     text = update.message.text
@@ -53,7 +48,7 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         start(update, context)
 
 def main() -> None:
-    TOKEN = os.getenv('TELEGRAM_TOKEN') or '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38'
+    TOKEN = os.getenv('TELEGRAM_TOKEN') or 'YOUR_BOT_TOKEN_HERE'
     
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
@@ -62,7 +57,7 @@ def main() -> None:
     dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     updater.start_polling()
-    print("Bot is running...")
+    print("✅ Bot is running...")
     updater.idle()
 
 if __name__ == '__main__':
