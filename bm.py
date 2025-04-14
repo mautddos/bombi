@@ -1,12 +1,12 @@
 import os
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext, Filters  # v13.x
+from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext, Filters
 
-# Video location info
-CHANNEL_ID = "-1002441094491"  # Channel ID extracted from your link (https://t.me/c/2441094491/8889)
+# Channel & video info
+CHANNEL_ID = "-1002441094491"  # Channel ID
 MESSAGE_ID = 8889              # The message ID of the video
 
-# Keyboard UI
+# Custom keyboard
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["Get Video🎬"],
@@ -24,14 +24,20 @@ def start(update: Update, context: CallbackContext) -> None:
 
 def send_video(update: Update, context: CallbackContext) -> None:
     try:
-        context.bot.forward_message(
+        # Get original video message from channel
+        original_msg = context.bot.get_chat(CHANNEL_ID).get_message(MESSAGE_ID)
+        
+        # Send as fresh upload (no forward tag)
+        context.bot.send_video(
             chat_id=update.message.chat_id,
-            from_chat_id=CHANNEL_ID,
-            message_id=MESSAGE_ID
+            video=original_msg.video.file_id,
+            caption="Here’s your video 🎬",
+            supports_streaming=True
         )
+
     except Exception as e:
-        print(f"Failed to forward video: {e}")
-        update.message.reply_text("Sorry, I couldn't fetch the video. Make sure I'm admin in the channel.")
+        print(f"Error sending video: {e}")
+        update.message.reply_text("Couldn't send video. Make sure bot is admin in the channel and video is accessible.")
 
 def handle_message(update: Update, context: CallbackContext) -> None:
     text = update.message.text
