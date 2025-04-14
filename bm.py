@@ -48,7 +48,7 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         start(update, context)
 
 def main() -> None:
-    TOKEN = os.getenv('TELEGRAM_TOKEN') or 'YOUR_BOT_TOKEN_HERE'
+    TOKEN = os.getenv('TELEGRAM_TOKEN') or '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38'
     
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
