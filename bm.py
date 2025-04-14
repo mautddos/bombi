@@ -263,12 +263,11 @@ def generate_usernames(update: Update, context: CallbackContext, count=1):
                 checker.unavailable_count += 1
             
             # Update progress every 5 seconds or when we find a username
-     # Update progress every 5 seconds or when we find a username
-current_time = time.time()
-if current_time - last_update_time > 5 or is_available:
-    progress = min(100, int((len(available_usernames) / count) * 100))  # Fixed this line
-    bars = int(progress / 10)
-    progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
+            current_time = time.time()
+            if current_time - last_update_time > 5 or is_available:
+                progress = min(100, int((len(available_usernames) / count) * 100))
+                bars = int(progress / 10)
+                progress_bar = f"[{'█' * bars}{'░' * (10 - bars)}] {progress}%"
                 
                 status_text = (
                     f"🔍 Generating usernames...\n"
