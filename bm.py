@@ -1,7 +1,6 @@
 import os
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackContext
-from telegram.ext import filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, Dispatcher
 
 # Video URLs array
 VIDEOS = [
@@ -47,14 +46,14 @@ def handle_message(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     # Get the token from environment variable or replace with your token
-    TOKEN = os.getenv('TELEGRAM_TOKEN', '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38')
+    TOKEN = os.getenv('TELEGRAM_TOKEN') or '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38'
     
-    updater = Updater(TOKEN)
+    updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
     # Add handlers
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
     # Start the Bot
     updater.start_polling()
