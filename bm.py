@@ -1,35 +1,32 @@
 import logging
-import pytz  # Import pytz for timezone support
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Enable logging
+# Setup logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Telegram video link
+# Bot configuration
+BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  # REPLACE THIS WITH NEW TOKEN AFTER TESTING
 VIDEO_LINK = "https://t.me/botstomp/123"
-BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  # Replace with your actual token
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send an attractive start message with buttons when the command /start is issued."""
+    """Send welcome message with buttons"""
     user = update.effective_user
-    welcome_text = f"""
-✨ *Welcome {user.first_name}!* ✨
+    welcome_msg = f"""
+🌟 *Welcome {user.first_name}!* 🌟
 
-🚀 *Ready to explore amazing features?* 🚀
+Choose an option below:
 
 🔹 *SU* - Super Utility
 🔹 *PU* - Premium Utility
 🔹 *CU* - Common Utility
-
-Tap a button below to get started!
 """
-    
-    keyboard = [
+
+    buttons = [
         [
             InlineKeyboardButton("SU", callback_data="su"),
             InlineKeyboardButton("PU", callback_data="pu"),
@@ -40,59 +37,39 @@ Tap a button below to get started!
         ]
     ]
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
-        welcome_text,
-        reply_markup=reply_markup,
+        welcome_msg,
+        reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown"
     )
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle button presses."""
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button presses"""
     query = update.callback_query
     await query.answer()
     
-    # Define responses for each button
-    responses = {
-        "su": "🎉 *Super Utility* selected!\nHere's your video:",
-        "pu": "💎 *Premium Utility* selected!\nHere's your video:",
-        "cu": "🛠 *Common Utility* selected!\nHere's your video:",
+    button_responses = {
+        "su": "🎉 Super Utility video:",
+        "pu": "💎 Premium Utility video:",
+        "cu": "🛠 Common Utility video:",
         "back": "🔙 Returning to main menu..."
     }
     
-    # Get the response text
-    response_text = responses.get(query.data, "Invalid option")
+    response = button_responses.get(query.data, "Invalid option")
     
     if query.data == "back":
-        # Recreate the main menu
-        keyboard = [
-            [
-                InlineKeyboardButton("SU", callback_data="su"),
-                InlineKeyboardButton("PU", callback_data="pu"),
-            ],
-            [
-                InlineKeyboardButton("CU", callback_data="cu"),
-                InlineKeyboardButton("Back", callback_data="back"),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=response_text, 
-            reply_markup=reply_markup, 
-            parse_mode="Markdown"
-        )
+        await start(update, context)
     else:
-        # For SU, PU, CU buttons - send the video
+        # Send video
         await context.bot.send_video(
             chat_id=query.message.chat_id,
             video=VIDEO_LINK,
-            caption=response_text,
+            caption=response,
             parse_mode="Markdown"
         )
         
-        # Show the buttons again
-        keyboard = [
+        # Show buttons again
+        buttons = [
             [
                 InlineKeyboardButton("SU", callback_data="su"),
                 InlineKeyboardButton("PU", callback_data="pu"),
@@ -102,24 +79,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 InlineKeyboardButton("Back", callback_data="back"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(
-            "What would you like to do next?",
-            reply_markup=reply_markup
+            "Choose another option:",
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
 
 def main() -> None:
-    """Run the bot."""
-    # Create the Application with explicit timezone
-    application = Application.builder() \
-        .token(BOT_TOKEN) \
-        .build()
+    """Start the bot"""
+    try:
+        # Create Application instance
+        app = Application.builder().token(BOT_TOKEN).build()
+        
+        # Add handlers
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(handle_buttons))
+        
+        # Run bot
+        logger.info("Bot is running...")
+        app.run_polling()
+        
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
 
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    
-    # Add button handler
-    application.add_handler(CallbackQueryHandler(button))
-
-    # Run the bot until the user presses Ctrl-C
-    application.
+if __name__ == "__main__":
+    main()
