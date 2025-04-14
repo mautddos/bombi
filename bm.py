@@ -1,5 +1,5 @@
 import logging
-import pytz  # Required for timezone support
+import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -10,8 +10,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot configuration - REPLACE WITH NEW TOKEN AFTER TESTING!
-BOT_TOKEN = "8125880528:AAEslZC6Bcgo79TisxS8v5cnuPElvbFG0FA"  
+# Bot configuration - REPLACE WITH NEW TOKEN!
+BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"  # ⚠️ REVOKE THIS TOKEN!
 VIDEO_LINK = "https://t.me/botstomp/123"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -57,7 +57,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query.data == "back":
         await start(update, context)
     else:
-        # Send video
         await context.bot.send_video(
             chat_id=query.message.chat_id,
             video=VIDEO_LINK,
@@ -65,7 +64,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="Markdown"
         )
         
-        # Show buttons again
         buttons = [
             [InlineKeyboardButton("SU", callback_data="su"),
              InlineKeyboardButton("PU", callback_data="pu")],
@@ -84,9 +82,9 @@ def main() -> None:
         app = Application.builder() \
             .token(BOT_TOKEN) \
             .arbitrary_callback_data(True) \
+            .post_init(lambda app: app.job_queue.scheduler.configure(timezone=pytz.UTC)) \
             .build()
         
-        # Add handlers
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CallbackQueryHandler(handle_buttons))
         
@@ -97,6 +95,6 @@ def main() -> None:
         logger.error(f"Bot failed: {e}")
 
 if __name__ == "__main__":
-    # Install required packages first:
+    # First install required packages:
     # pip install python-telegram-bot pytz
     main()
