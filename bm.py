@@ -6,7 +6,7 @@ import random
 import requests
 from datetime import datetime
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler, MessageHandler, Filters
 
 # Telegram Bot Token
 TOKEN = "8102265512:AAGXrXgWir3LxkHlN8jruWTdXh7hOo8yasM"
@@ -250,7 +250,6 @@ class InstagramAccountCreator:
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a welcome message when the command /start is issued."""
-    # Create a beautiful welcome message
     welcome_message = """
 🌟 *Welcome to Instagram Account Creator Bot* 🌟
 
@@ -264,14 +263,12 @@ This bot helps you create Instagram accounts easily.
 📢 *Join our channel for updates and more tools:*
 """
 
-    # Create inline keyboard with channel button
     keyboard = [
         [InlineKeyboardButton("Join Our Channel 📢", url=CHANNEL_LINK)],
         [InlineKeyboardButton("Create Account 🚀", callback_data='create_account')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Send the message with Markdown formatting
     update.message.reply_text(
         welcome_message, 
         parse_mode='Markdown',
