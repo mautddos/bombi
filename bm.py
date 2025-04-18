@@ -5,6 +5,7 @@ BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
 CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
+START_IMAGE_URL = "https://t.me/botstomp/125"
 
 # Store user progress
 user_progress = {}
@@ -27,10 +28,12 @@ Please join our channel first to use this bot:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        text=welcome_text,
-        reply_markup=reply_markup,
-        parse_mode=None  # Disable Markdown parsing
+    # Send photo with caption
+    await context.bot.send_photo(
+        chat_id=update.effective_chat.id,
+        photo=START_IMAGE_URL,
+        caption=welcome_text,
+        reply_markup=reply_markup
     )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
