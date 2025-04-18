@@ -13,17 +13,20 @@ from telegram.ext import (
     filters
 )
 
-# Configuration - Use environment variables for sensitive data
+# Configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38')
 CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
-ADMIN_IDS = {8167507955}  # Add more admin IDs as needed
+ADMIN_IDS = {8167507955}  # Admin user IDs
+DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
 
 # Store user progress and bot data
 user_progress = defaultdict(dict)
 bot_start_time = datetime.now()
 total_users = 0
+blocked_users = set()
+sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id), ...]}
 
 # Set up logging
 logging.basicConfig(
@@ -32,8 +35,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Blocklist functionality
-blocked_users = set()
+# Global application reference for cleanup tasks
+application = None
+
+async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
+    """Delete a message after specified delay"""
+    await asyncio.sleep(delay)
+    try:
+        await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"Deleted message {message_id} in chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Failed to delete message {message_id}: {e}")
+
+async def cleanup_user_messages(user_id: int):
+    """Cleanup all scheduled messages for a user"""
+    if user_id in sent_messages:
+        for chat_id, message_id in sent_messages[user_id]:
+            try:
+                await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
+        del sent_messages[user_id]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -61,11 +83,13 @@ Please join our channel first to use this bot:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    sent_message = await update.message.reply_text(
         text=welcome_text,
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
+    # Schedule welcome message deletion
+    asyncio.create_task(delete_message_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
 
 async def notify_admin(bot, message: str):
     for admin_id in ADMIN_IDS:
@@ -116,14 +140,17 @@ async def send_batch(bot, user_id, chat_id):
     
     for msg_id in range(start_msg + 1, end_msg + 1):
         try:
-            await bot.copy_message(
+            sent_message = await bot.copy_message(
                 chat_id=chat_id,
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id,
                 disable_notification=True
             )
             sent_count += 1
-            await asyncio.sleep(0.5)  # Rate limiting
+            # Schedule video deletion
+            asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+            sent_messages[user_id].append((chat_id, sent_message.message_id))
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Failed to copy message {msg_id}: {e}")
     
@@ -131,16 +158,23 @@ async def send_batch(bot, user_id, chat_id):
         user_progress[user_id]['last_sent'] = end_msg
         keyboard = [[InlineKeyboardButton("Next", callback_data='next')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await bot.send_message(
+        
+        control_message = await bot.send_message(
             chat_id=chat_id,
-            text=f"Sent {sent_count} videos.",
+            text=f"Sent {sent_count} videos (will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
             reply_markup=reply_markup
         )
+        # Schedule control message deletion
+        asyncio.create_task(delete_message_after_delay(chat_id, control_message.message_id, DELETE_AFTER_SECONDS))
+        sent_messages[user_id].append((chat_id, control_message.message_id))
     else:
-        await bot.send_message(
+        error_message = await bot.send_message(
             chat_id=chat_id,
             text="No more videos available or failed to send."
         )
+        # Schedule error message deletion
+        asyncio.create_task(delete_message_after_delay(chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
+        sent_messages[user_id].append((chat_id, error_message.message_id))
 
 # Admin commands
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -175,6 +209,7 @@ async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         user_id = int(context.args[0])
         blocked_users.add(user_id)
+        await cleanup_user_messages(user_id)
         await update.message.reply_text(f"✅ User {user_id} has been blocked.")
     except ValueError:
         await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
@@ -230,14 +265,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     if update and hasattr(update, 'effective_user'):
         user_id = update.effective_user.id
         try:
-            await context.bot.send_message(
+            error_message = await context.bot.send_message(
                 chat_id=user_id,
                 text="Sorry, an error occurred. Please try again later."
             )
+            # Schedule error message deletion
+            asyncio.create_task(delete_message_after_delay(error_message.chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
         except Exception:
             pass
 
 def main() -> None:
+    global application
     application = Application.builder().token(BOT_TOKEN).build()
     
     # User commands
