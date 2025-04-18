@@ -1,5 +1,5 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
 CHANNEL_ID = -1002441094491
@@ -7,30 +7,23 @@ CHANNEL_ID = -1002441094491
 # Store user progress
 user_progress = {}
 
-def start(update: Update, context: CallbackContext) -> None:
-    keyboard = [
-        [InlineKeyboardButton("Videos", callback_data='videos')]
-    ]
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    keyboard = [[InlineKeyboardButton("Videos", callback_data='videos')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    if update.message:
-        update.message.reply_text('Click the button to get videos:', reply_markup=reply_markup)
-    else:
-        update.callback_query.edit_message_text('Click the button to get videos:', reply_markup=reply_markup)
+    await update.message.reply_text('Click the button to get videos:', reply_markup=reply_markup)
 
-def button(update: Update, context: CallbackContext) -> None:
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
     user_id = query.from_user.id
 
     if query.data == 'videos':
-        # Initialize or reset user progress
         user_progress[user_id] = {'last_sent': 0}
-        send_batch(context.bot, user_id, query.message.chat.id)
-    
+        await send_batch(context.bot, user_id, query.message.chat.id)
     elif query.data == 'next':
-        send_batch(context.bot, user_id, query.message.chat.id)
+        await send_batch(context.bot, user_id, query.message.chat.id)
 
-def send_batch(bot, user_id, chat_id):
+async def send_batch(bot, user_id, chat_id):
     if user_id not in user_progress:
         user_progress[user_id] = {'last_sent': 0}
     
@@ -40,7 +33,7 @@ def send_batch(bot, user_id, chat_id):
     
     for msg_id in range(start_msg + 1, end_msg + 1):
         try:
-            bot.copy_message(
+            await bot.copy_message(
                 chat_id=chat_id,
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id
@@ -51,34 +44,29 @@ def send_batch(bot, user_id, chat_id):
     
     if sent_count > 0:
         user_progress[user_id]['last_sent'] = end_msg
-        
-        # Add Next button
         keyboard = [[InlineKeyboardButton("Next", callback_data='next')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        bot.send_message(
+        await bot.send_message(
             chat_id=chat_id,
             text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
             reply_markup=reply_markup
         )
     else:
-        bot.send_message(
+        await bot.send_message(
             chat_id=chat_id,
             text="No more videos available or failed to send."
         )
 
 def main() -> None:
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(BOT_TOKEN, use_context=True)
+    # Create the Application
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+    # Register handlers
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(button))
 
-    dispatcher.add_handler(CommandHandler('start', start))
-    dispatcher.add_handler(CallbackQueryHandler(button))
-
-    # Start the Bot
-    updater.start_polling()
-    updater.idle()
+    # Run the bot
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
