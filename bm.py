@@ -5,13 +5,13 @@ BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
 CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
-START_IMAGE_URL = "https://telegra.ph/file/1256b4e5e4e6a5d3a1a1e.jpg"  # Changed to direct image URL
+START_IMAGE_URL = "https://t.me/botstomp/125"  # Image for /start command
 
 # Store user progress
 user_progress = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Welcome message
+    # Simplified welcome message without Markdown
     welcome_text = """
 🎬 Welcome to Video Bot! 🎬
 
@@ -28,22 +28,13 @@ Please join our channel first to use this bot:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    try:
-        # Try to send photo first
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=START_IMAGE_URL,
-            caption=welcome_text,
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        print(f"Error sending photo: {e}")
-        # Fallback to text message if photo fails
-        await update.message.reply_text(
-            text=welcome_text,
-            reply_markup=reply_markup,
-            parse_mode=None
-        )
+    # First send the image
+    await update.message.reply_photo(
+        photo=START_IMAGE_URL,
+        caption=welcome_text,
+        reply_markup=reply_markup,
+        parse_mode=None  # Disable Markdown parsing
+    )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
