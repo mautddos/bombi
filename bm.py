@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 # Store user progress
 user_data = {}
 blocked_users = set()
-messages_to_delete = {}  # Store message IDs for deletion
 
 # Hindi texts with sexy language
 WELCOME_TEXT = """
@@ -50,7 +49,7 @@ WELCOME_TEXT = """
 """
 
 VERIFIED_TEXT = """
-💦 *वेरीफाई हो गया! अब तुम्हारी बारी है...* 💦
+💦 *वेरीफाई हो गया! अब तुम्हारी बा��ी है...* 💦
 
 अनलॉक हुआ:
 🥵 100+ प्राइवेट वीडियो
@@ -120,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Send image with caption
     try:
         sent_message = await context.bot.send_photo(
-            chat_id=update.message.chat_id,
+            chat_id=update.effective_chat.id,
             photo=START_IMAGE_URL,
             caption=WELCOME_TEXT,
             reply_markup=reply_markup,
@@ -135,28 +134,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     
     # Schedule welcome message deletion after 5 minutes
-    asyncio.create_task(delete_after_delay(update.message.chat_id, sent_message.message_id, 300))
+    asyncio.create_task(delete_after_delay(update.effective_chat.id, sent_message.message_id, 300))
 
 async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Verify channel membership"""
     query = update.callback_query
     await query.answer()
+    user_id = query.from_user.id
     
-    if query.from_user.id in blocked_users:
+    if user_id in blocked_users:
         await query.edit_message_text("🚫 आपको ब्लॉक कर दिया गया है!")
         return
     
     try:
-        member = await context.bot.get_chat_member(VERIFICATION_CHANNEL, query.from_user.id)
+        member = await context.bot.get_chat_member(VERIFICATION_CHANNEL, user_id)
         if member.status in ['member', 'administrator', 'creator']:
-            user_data[query.from_user.id]['verified'] = True
+            user_data[user_id]['verified'] = True
             keyboard = [[InlineKeyboardButton("💦 20 वीडियो पाएं", callback_data='get_videos')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             # Try to edit message with image
             try:
-                await context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
-                await context.bot.send_photo(
+                await query.message.delete()
+                sent_message = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
                     photo=START_IMAGE_URL,
                     caption=VERIFIED_TEXT,
@@ -165,14 +165,14 @@ async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
             except Exception as e:
                 logger.error(f"Error editing with image: {e}")
-                await query.edit_message_text(
+                sent_message = await query.edit_message_text(
                     VERIFIED_TEXT,
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
             
             # Schedule verification message deletion after 5 minutes
-            asyncio.create_task(delete_after_delay(query.message.chat_id, query.message.message_id, 300))
+            asyncio.create_task(delete_after_delay(query.message.chat_id, sent_message.message_id, 300))
         else:
             await query.answer("❌ पहले चैनल ज्वाइन करें!", show_alert=True)
     except Exception as e:
