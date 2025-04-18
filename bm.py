@@ -1,107 +1,80 @@
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    MessageHandler,
-    filters
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 
-# Bot Configuration
 BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
-CHANNEL_ID = -1002441094491  # Channel with videos
-VERIFICATION_CHANNEL = -1002440538814  # Channel user must join
+CHANNEL_ID = -1002441094491
 
-# Enable logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Store user progress
+user_progress = {}
 
-# Store user progress and verification status
-user_data = {}
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send welcome message with channel join button"""
-    if not update.message:
-        return
-        
-    user_id = update.effective_user.id
-    username = update.effective_user.full_name
-    
-    welcome_msg = f"""
-🌟 *Welcome {username}!* 🌟
-
-🔞 This bot provides adult content. You must be 18+ to use this bot.
-
-✅ *Features:*
-- High quality videos
-- Regular updates
-- Fast delivery
-
-⚠️ *Rules:*
-1. Don't spam
-2. No sharing of illegal content
-3. Respect other users
-
-Click the button below to join our channel and unlock the content!
-    """
-    
+def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
-        [InlineKeyboardButton("🔞 Join Channel", url="https://t.me/c/2440538814")],  # Updated URL format
-        [InlineKeyboardButton("✅ Verify Join", callback_data='verify_join')]
+        [InlineKeyboardButton("Videos", callback_data='videos')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Store that we've sent the initial message to this user
-    user_data[user_id] = {'verified': False}
-    
-    await update.message.reply_text(
-        welcome_msg,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
+    if update.message:
+        update.message.reply_text('Click the button to get videos:', reply_markup=reply_markup)
+    else:
+        update.callback_query.edit_message_text('Click the button to get videos:', reply_markup=reply_markup)
 
-async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check if user has joined the channel"""
+def button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer()
+    query.answer()
     user_id = query.from_user.id
-    
-    try:
-        # First check if user is in user_data
-        if user_id not in user_data:
-            user_data[user_id] = {'verified': False}
-            
-        # Check channel membership
-        try:
-            member = await context.bot.get_chat_member(VERIFICATION_CHANNEL, user_id)
-            if member.status in ['member', 'administrator', 'creator']:
-                # User has joined the channel
-                user_data[user_id]['verified'] = True
-                
-                # Send video menu
-                keyboard = [
-                    [InlineKeyboardButton("🎬 Get Videos", callback_data='get_videos')]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await query.edit_message_text(
-                    "✅ *Verification successful!*\n\nClick below to get videos:",
-                    parse_mode='Markdown',
-                    reply_markup=reply_markup
-                )
-            else:
-                await query.answer("❌ You haven't joined the channel yet!", show_alert=True)
-        except Exception as e:
-            logger.error(f"Error checking channel membership: {e}")
-            await query.answer("❌ Please make sure you've joined the channel and try again.", show_alert=True)
-            
-    except Exception as e:
-        logger.error(f"Error in verify_join: {e}")
-        await query.answer("❌ An error occurred. Please try again.", show_alert=True)
 
-# ... [rest of your code remains the same]
+    if query.data == 'videos':
+        # Initialize or reset user progress
+        user_progress[user_id] = {'last_sent': 0}
+        send_batch(user_id, query)
+    
+    elif query.data == 'next':
+        send_batch(user_id, query)
+
+def send_batch(user_id, query):
+    if user_id not in user_progress:
+        user_progress[user_id] = {'last_sent': 0}
+    
+    start_msg = user_progress[user_id]['last_sent']
+    end_msg = start_msg + 10
+    sent_count = 0
+    
+    for msg_id in range(start_msg + 1, end_msg + 1):
+        try:
+            query.bot.copy_message(
+                chat_id=query.message.chat.id,
+                from_chat_id=CHANNEL_ID,
+                message_id=msg_id
+            )
+            sent_count += 1
+        except Exception as e:
+            print(f"Failed to copy message {msg_id}: {e}")
+    
+    if sent_count > 0:
+        user_progress[user_id]['last_sent'] = end_msg
+        
+        # Add Next button
+        keyboard = [[InlineKeyboardButton("Next", callback_data='next')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
+            reply_markup=reply_markup
+        )
+    else:
+        query.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="No more videos available or failed to send."
+        )
+
+def main() -> None:
+    updater = Updater(BOT_TOKEN)
+    dispatcher = updater.dispatcher
+
+    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(CallbackQueryHandler(button))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
