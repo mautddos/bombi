@@ -28,13 +28,14 @@ Please join our channel first to use this bot:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # First send the image
+    # Send the picture with the welcome text
     await update.message.reply_photo(
-        photo=START_IMAGE_URL,
+        photo="https://t.me/botstomp/125",
         caption=welcome_text,
         reply_markup=reply_markup,
-        parse_mode=None  # Disable Markdown parsing
+        parse_mode=None  # No Markdown parsing
     )
+
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
