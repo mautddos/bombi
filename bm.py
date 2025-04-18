@@ -2,8 +2,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
-CHANNEL_ID = -1002441094491
-CHANNEL_USERNAME = "@seedhe_maut"  # Replace with your channel username
+CHANNEL_ID = -1002441094491  # Channel where videos are stored
+VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
+CHANNEL_USERNAME = "seedhe_maut"  # Your channel username without @
 
 # Store user progress
 user_progress = {}
@@ -16,6 +17,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     Here you can get access to our exclusive video collection. 
 
     Please join our channel first to use this bot:
+    @seedhe_maut
     """
     
     # Create buttons
@@ -37,9 +39,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = query.from_user.id
 
     if query.data == 'check_join':
-        # Check if user has joined the channel
+        # Check if user has joined the verification channel
         try:
-            chat_member = await context.bot.get_chat_member(CHANNEL_ID, user_id)
+            chat_member = await context.bot.get_chat_member(VERIFICATION_CHANNEL_ID, user_id)
             if chat_member.status in ['member', 'administrator', 'creator']:
                 # User is a member, show video options
                 keyboard = [[InlineKeyboardButton("Get Videos", callback_data='videos')]]
