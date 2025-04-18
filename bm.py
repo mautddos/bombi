@@ -10,15 +10,15 @@ CHANNEL_USERNAME = "seedhe_maut"  # Your channel username without @
 user_progress = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Welcome message
+    # Welcome message with fixed Markdown formatting
     welcome_text = """
-    🎬 *Welcome to Video Bot!* 🎬
+*🎬 Welcome to Video Bot! 🎬*
 
-    Here you can get access to our exclusive video collection. 
+Here you can get access to our exclusive video collection.
 
-    Please join our channel first to use this bot:
-    @seedhe_maut
-    """
+Please join our channel first to use this bot:
+@seedhe_maut
+"""
     
     # Create buttons
     keyboard = [
@@ -28,7 +28,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        welcome_text,
+        text=welcome_text,
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -47,14 +47,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 keyboard = [[InlineKeyboardButton("Get Videos", callback_data='videos')]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
-                    "Thanks for joining! Click below to get videos:",
+                    text="Thanks for joining! Click below to get videos:",
                     reply_markup=reply_markup
                 )
             else:
-                await query.edit_message_text("Please join the channel first to access videos.")
+                await query.edit_message_text(text="❌ Please join the channel first to access videos.")
         except Exception as e:
             print(f"Error checking membership: {e}")
-            await query.edit_message_text("Couldn't verify your channel membership. Please try again.")
+            await query.edit_message_text(text="⚠️ Couldn't verify your channel membership. Please try again.")
     
     elif query.data == 'videos':
         user_progress[user_id] = {'last_sent': 0}
@@ -88,13 +88,13 @@ async def send_batch(bot, user_id, chat_id):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await bot.send_message(
             chat_id=chat_id,
-            text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
+            text=f"📤 Sent {sent_count} videos. Last sent ID: {end_msg}",
             reply_markup=reply_markup
         )
     else:
         await bot.send_message(
             chat_id=chat_id,
-            text="No more videos available or failed to send."
+            text="⚠️ No more videos available or failed to send."
         )
 
 def main() -> None:
