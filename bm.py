@@ -112,7 +112,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error notifying admin: {e}")
     
     keyboard = [
-        [InlineKeyboardButton("💋 चैनल ज्वाइन करें", url="https://t.me/your_channel")],
+        [InlineKeyboardButton("💋 चैनल ज्वाइन करें", url="https://t.me/+LNs_qcLHlbNkN2E1")],
         [InlineKeyboardButton("🔥 वेरीफाई करें", callback_data='verify_join')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
