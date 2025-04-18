@@ -1,286 +1,445 @@
-#!/usr/bin/env python3
-"""
-Instagram Proxy Checker v3.3
-With Telegram Bot Integration
-"""
-
-import requests
-from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    filters
+)
+import datetime
 import time
-import random
 import os
-import sys
-from colorama import init, Fore, Back, Style
-from typing import List, Tuple, Dict, Set
+import asyncio
 
-# ========== INITIALIZATION ========== #
-init(autoreset=True)
+# Bot Configuration
+BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
+CHANNEL_ID = -1001234567890  # Your channel ID with videos
+VERIFICATION_CHANNEL = -1001234567891  # Channel user must join
+ADMIN_ID = 8167507955  # Your admin ID
+START_IMAGE_URL = "https://t.me/botstomp/125"  # Image for start and next buttons
 
-# ========== CONSTANTS ========== #
-MAX_WORKERS = 50               # Increased thread pool size
-TIMEOUT = 8                    # Reduced timeout
-RESULTS_FILE = "instagram_proxies.txt"
-LOG_FILE = "proxy_checker.log"
-UNIQUE_PROXIES_FILE = "unique_proxies.txt"
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Telegram Bot Configuration
-BOT_TOKEN = "8089727906:AAFLDk8a_V0EbNchoANhR-MaF8mPaJ5bXfM"
-CHAT_ID = "8167507955"
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+# Store user progress
+user_data = {}
+blocked_users = set()
+messages_to_delete = {}  # Store message IDs for deletion
 
-# ========== USER AGENTS ========== #
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
-    "Instagram 289.0.0.77.109 Android (33/13; 480dpi; 1080x2400; Google/google; Pixel 7; panther; panther; en_US)",
-    "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15"
-]
+# Hindi texts with sexy language
+WELCOME_TEXT = """
+🔥 *ख़्वाहिशों का राज़ बॉट में आपका स्वागत है!* 🔥
 
-# ========== UPDATED PROXY SOURCES ========== #
-PROXY_SOURCES = [
-    "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http",
-    "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&protocols=http",
-    "https://www.proxy-list.download/api/v1/get?type=http",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"
-]
+💋 यहाँ मिलेगा:
+✅ गर्मागर्म भारतीय कंटेंट
+✅ प्राइवेट सेक्सी वीडियो
+✅ वो सब कुछ जो आपकी रातों को गर्म कर दे
 
-# ========== COLOR SCHEME ========== #
-COLOR = {
-    "success": Fore.GREEN + Style.BRIGHT,
-    "error": Fore.RED + Style.BRIGHT,
-    "warning": Fore.YELLOW + Style.BRIGHT,
-    "info": Fore.CYAN + Style.BRIGHT,
-    "proxy": Fore.MAGENTA,
-    "highlight": Fore.WHITE + Back.BLUE,
-    "timestamp": Fore.LIGHTBLACK_EX
-}
+📛 *नियम:* 
+1. पहले हमारे चैनल को ज्वाइन करें
+2. वेरीफाई करें
+3. वीडियो का मजा लें
 
-# ========== CORE FUNCTIONS ========== #
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+👇 नीचे बटन दबाकर चैनल ज्वाइन करें और अपनी इच्छाओं को आजाद करें!
+"""
 
-def print_banner():
-    clear_screen()
-    banner = f"""
-{COLOR['highlight']} ╔════════════════════════════════════════════════╗
-{COLOR['highlight']} ║      INSTAGRAM PROXY CHECKER v3.3 (24/7)       ║
-{COLOR['highlight']} ║    • Telegram Updates • Faster Checking •      ║
-{COLOR['highlight']} ╚════════════════════════════════════════════════╝
-    """
-    print(banner)
+VERIFIED_TEXT = """
+💦 *वेरीफाई हो गया! अब तुम्हारी बारी है...* 💦
 
-def log(message: str, level: str = "info") -> None:
-    timestamp = f"{COLOR['timestamp']}[{time.strftime('%H:%M:%S')}]"
-    colored_msg = f"{timestamp} {COLOR[level]}{message}"
-    print(colored_msg)
+अनलॉक हुआ:
+🥵 100+ प्राइवेट वीडियो
+🍑 गुप्त कलेक्शन
+🔥 वो सीन जो आपको पागल कर दें
+
+👇 अभी 20 वीडियो फ्री में पाएं!
+"""
+
+VIDEO_SENT_TEXT = """
+💦 *{} वीडियो आपके लिए तैयार हैं!* 💦
+
+अगले 20 वीडियो पाने के लिए नीचे बटन दबाएं...
+या नए सिरे से शुरू करें!
+
+❤️ अगर आपको बॉट पसंद आया तो दोस्तों को भी बताएं!
+
+⚠️ नोट: वीडियो 1 मिनट बाद अपने आप डिलीट हो जाएंगे!
+"""
+
+application = None  # Global application variable
+
+async def delete_message(chat_id, message_id):
+    """Delete a specific message"""
+    try:
+        await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"Deleted message {message_id} in chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Error deleting message {message_id}: {e}")
+
+async def delete_after_delay(chat_id, message_id, delay=60):
+    """Delete message after specified delay"""
+    await asyncio.sleep(delay)
+    await delete_message(chat_id, message_id)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send welcome message with image"""
+    user_id = update.effective_user.id
+    if user_id in blocked_users:
+        await update.message.reply_text("🚫 आपको ब्लॉक कर दिया गया है!")
+        return
     
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
-
-def get_random_headers() -> Dict[str, str]:
-    return {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-        "X-IG-App-ID": "936619743392459",
-        "X-Requested-With": "XMLHttpRequest"
+    username = update.effective_user.username or "No username"
+    user_data[user_id] = {
+        'verified': False, 
+        'last_sent': 0, 
+        'username': username, 
+        'join_date': datetime.datetime.now(),
+        'video_count': 0
     }
-
-# ========== TELEGRAM FUNCTIONS ========== #
-def send_telegram_message(text: str) -> bool:
-    try:
-        params = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            params=params,
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception as e:
-        log(f"Failed to send Telegram message: {str(e)}", "error")
-        return False
-
-def send_telegram_file(filename: str, caption: str = "") -> bool:
-    try:
-        with open(filename, "rb") as file:
-            files = {"document": file}
-            data = {"chat_id": CHAT_ID, "caption": caption}
-            response = requests.post(
-                TELEGRAM_API_URL,
-                files=files,
-                data=data,
-                timeout=20
-            )
-            return response.status_code == 200
-    except Exception as e:
-        log(f"Failed to send Telegram file: {str(e)}", "error")
-        return False
-
-# ========== PROXY MANAGEMENT ========== #
-def fetch_proxies_from_source(url: str) -> Set[str]:
-    try:
-        response = requests.get(url, headers=get_random_headers(), timeout=15)
-        response.raise_for_status()
-        
-        if "geonode" in url:
-            return {f"{p['ip']}:{p['port']}" for p in response.json().get("data", [])}
-        else:
-            proxies = set()
-            for line in response.text.splitlines():
-                if ":" in line and "." in line:
-                    proxy = line.strip()
-                    if proxy.count(":") == 1:
-                        proxies.add(proxy)
-            return proxies
-            
-    except Exception as e:
-        log(f"Failed {url.split('/')[2]}: {str(e)}", "warning")
-        return set()
-
-def fetch_fresh_proxies() -> List[str]:
-    log("Fetching proxies from updated sources...", "info")
     
-    proxies = set()
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_url = {executor.submit(fetch_proxies_from_source, url): url for url in PROXY_SOURCES}
-        
-        for future in as_completed(future_to_url):
-            url = future_to_url[future]
+    # Notify admin
+    try:
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"🆕 नया यूजर!\nID: {user_id}\nUsername: @{username}"
+        )
+    except Exception as e:
+        logger.error(f"Error notifying admin: {e}")
+    
+    keyboard = [
+        [InlineKeyboardButton("💋 चैनल ज्वाइन करें", url="https://t.me/your_channel")],
+        [InlineKeyboardButton("🔥 वेरीफाई करें", callback_data='verify_join')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Send image with caption
+    try:
+        sent_message = await context.bot.send_photo(
+            chat_id=update.message.chat_id,
+            photo=START_IMAGE_URL,
+            caption=WELCOME_TEXT,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error sending image: {e}")
+        sent_message = await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
+    # Schedule welcome message deletion after 5 minutes
+    asyncio.create_task(delete_after_delay(update.message.chat_id, sent_message.message_id, 300))
+
+async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Verify channel membership"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.from_user.id in blocked_users:
+        await query.edit_message_text("🚫 आपको ब्लॉक कर दिया गया है!")
+        return
+    
+    try:
+        member = await context.bot.get_chat_member(VERIFICATION_CHANNEL, query.from_user.id)
+        if member.status in ['member', 'administrator', 'creator']:
+            user_data[query.from_user.id]['verified'] = True
+            keyboard = [[InlineKeyboardButton("💦 20 वीडियो पाएं", callback_data='get_videos')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Try to edit message with image
             try:
-                new_proxies = future.result()
-                proxies.update(new_proxies)
-                log(f"Acquired {len(new_proxies)} proxies from {url.split('/')[2]}", "success")
+                await context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=START_IMAGE_URL,
+                    caption=VERIFIED_TEXT,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
             except Exception as e:
-                log(f"Error fetching from {url.split('/')[2]}: {str(e)}", "error")
-            time.sleep(0.5)  # Reduced delay
-    
-    return list(proxies)
+                logger.error(f"Error editing with image: {e}")
+                await query.edit_message_text(
+                    VERIFIED_TEXT,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            
+            # Schedule verification message deletion after 5 minutes
+            asyncio.create_task(delete_after_delay(query.message.chat_id, query.message.message_id, 300))
+        else:
+            await query.answer("❌ पहले चैनल ज्वाइन करें!", show_alert=True)
+    except Exception as e:
+        logger.error(f"Verification error: {e}")
+        await query.answer("❌ वेरीफाई नहीं हो पाया. फिर से कोशिश करें.", show_alert=True)
 
-# ========== PROXY VALIDATION ========== #
-def verify_instagram(proxy: str) -> Tuple[bool, int]:
-    test_url = "https://www.instagram.com/data/shared_data/"
-    try:
-        start_time = time.time()
-        response = requests.get(
-            test_url,
-            proxies={"http": f"http://{proxy}", "https": f"http://{proxy}"},
-            headers=get_random_headers(),
-            timeout=TIMEOUT
-        )
-        
-        if response.status_code == 200 and "config" in response.text:
-            return (True, int((time.time() - start_time) * 1000))
-    except:
-        pass
+async def send_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send video batch with auto-delete after 60 seconds"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
     
-    return (False, 0)
-
-# ========== MAIN SYSTEM ========== #
-def main_loop():
-    print_banner()
-    log("Starting Instagram Proxy Checker with Telegram integration", "success")
-    send_telegram_message("🚀 <b>Instagram Proxy Checker Started</b> 🚀")
+    if user_id in blocked_users:
+        await query.edit_message_text("🚫 आपको ब्लॉक कर दिया गया है!")
+        return
     
-    # Initialize files
-    for file in [RESULTS_FILE, LOG_FILE, UNIQUE_PROXIES_FILE]:
-        if os.path.exists(file):
-            os.remove(file)
+    if not user_data.get(user_id, {}).get('verified'):
+        await query.answer("पहले वेरीफाई करें!", show_alert=True)
+        return
     
-    while True:
+    # Edit the current message to show processing status
+    processing_msg = await query.edit_message_text("💋 आपके वीडियो तैयार किए जा रहे हैं...")
+    
+    # Send 20 videos with auto-delete
+    sent = 0
+    last_msg = user_data[user_id]['last_sent']
+    chat_id = query.message.chat_id
+    
+    # List to store all sent message IDs
+    sent_message_ids = []
+    
+    for msg_id in range(last_msg + 1, last_msg + 21):
         try:
-            # Get fresh proxies
-            proxies = fetch_fresh_proxies()
-            if not proxies:
-                log("No proxies acquired. Retrying...", "warning")
-                send_telegram_message("⚠️ No proxies acquired. Retrying in 5 seconds...")
-                time.sleep(5)
-                continue
-            
-            log(f"Testing {len(proxies)} fresh proxies against Instagram...", "info")
-            send_telegram_message(f"🔍 Testing {len(proxies)} fresh proxies against Instagram...")
-            
-            # Validate proxies
-            working_proxies = []
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                future_to_proxy = {executor.submit(verify_instagram, proxy): proxy for proxy in proxies}
-                
-                for future in as_completed(future_to_proxy):
-                    proxy = future_to_proxy[future]
-                    try:
-                        is_valid, speed = future.result()
-                        if is_valid and speed < 8000:  # Filter slow proxies
-                            log(f"Valid {COLOR['proxy']}{proxy.ljust(21)} {COLOR['success']}({speed}ms)", "success")
-                            working_proxies.append((proxy, speed))
-                    except Exception as e:
-                        pass
-            
-            # Save results
-            if working_proxies:
-                with open(RESULTS_FILE, "a") as f:
-                    for proxy, speed in working_proxies:
-                        f.write(f"{proxy}|{speed}\n")
-                
-                with open(UNIQUE_PROXIES_FILE, "a") as f:
-                    unique_proxies = set()
-                    if os.path.exists(UNIQUE_PROXIES_FILE):
-                        with open(UNIQUE_PROXIES_FILE, "r") as f_read:
-                            unique_proxies.update(line.split("|")[0] for line in f_read.readlines())
-                    
-                    new_proxies = 0
-                    for proxy, speed in working_proxies:
-                        if proxy not in unique_proxies:
-                            f.write(f"{proxy}|{speed}\n")
-                            new_proxies += 1
-                    
-                    log(f"Added {new_proxies} new unique proxies", "info")
-            
-            summary_msg = (
-                f"<b>Proxy Check Results</b>\n\n"
-                f"✅ Working: <b>{len(working_proxies)}</b>\n"
-                f"❌ Failed: <b>{len(proxies) - len(working_proxies)}</b>\n"
-                f"🆕 New: <b>{new_proxies}</b>\n"
-                f"📊 Total Unique: <b>{len(unique_proxies) + new_proxies}</b>"
+            sent_message = await context.bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=CHANNEL_ID,
+                message_id=msg_id
             )
+            sent += 1
+            user_data[user_id]['video_count'] += 1
+            sent_message_ids.append(sent_message.message_id)
             
-            log(f"\nResults: {len(working_proxies)}/{len(proxies)} working proxies", "highlight")
-            send_telegram_message(summary_msg)
-            
-            # Send the results file if we have new proxies
-            if new_proxies > 0:
-                if send_telegram_file(RESULTS_FILE, f"📄 {new_proxies} new working proxies"):
-                    log("Sent results to Telegram", "success")
-                else:
-                    log("Failed to send results to Telegram", "error")
-            
-            log("Starting next check...\n", "info")
-            time.sleep(60)  # Wait 1 minute before next check
-            
-        except KeyboardInterrupt:
-            log("\nStopped by user. Exiting...", "error")
-            send_telegram_message("🛑 <b>Proxy Checker Stopped</b> by user")
-            sys.exit(0)
+            # Add small delay between sends to avoid flooding
+            await asyncio.sleep(0.5)
         except Exception as e:
-            log(f"Critical error: {str(e)}. Restarting...", "error")
-            send_telegram_message(f"🔥 <b>Critical Error</b>: {str(e)}\nRestarting in 5 seconds...")
-            time.sleep(5)
+            logger.error(f"Error sending video {msg_id}: {e}")
+    
+    # Delete the processing message
+    await delete_message(chat_id, processing_msg.message_id)
+    
+    if sent > 0:
+        user_data[user_id]['last_sent'] += sent
+        
+        # Create keyboard for next actions
+        keyboard = [
+            [InlineKeyboardButton("💦 अगले 20 वीडियो", callback_data='next_batch')],
+            [InlineKeyboardButton("🔥 नया सत्र", callback_data='get_videos')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send status message with image
+        try:
+            status_message = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=START_IMAGE_URL,
+                caption=VIDEO_SENT_TEXT.format(sent),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error sending image: {e}")
+            status_message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=VIDEO_SENT_TEXT.format(sent),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        
+        # Schedule deletion of all sent messages (videos and status) after 60 seconds
+        for msg_id in sent_message_ids:
+            asyncio.create_task(delete_after_delay(chat_id, msg_id))
+        asyncio.create_task(delete_after_delay(chat_id, status_message.message_id))
+    else:
+        error_message = await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ कोई वीडियो उपलब्ध नहीं है!"
+        )
+        asyncio.create_task(delete_after_delay(chat_id, error_message.message_id))
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show bot status"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    total_users = len(user_data)
+    active_users = sum(1 for user in user_data.values() if user['verified'])
+    total_videos = sum(user['video_count'] for user in user_data.values())
+    
+    status_text = f"""
+📊 *बॉट स्टेटस* 📊
+
+👥 कुल यूजर्स: {total_users}
+💋 एक्टिव यूजर्स: {active_users}
+🚫 ब्लॉक्ड यूजर्स: {len(blocked_users)}
+🎬 भेजे गए वीडियो: {total_videos}
+🆕 आज के नए यूजर्स: {sum(1 for user in user_data.values() if (datetime.datetime.now() - user['join_date']).days == 0)}
+"""
+    await update.message.reply_text(status_text, parse_mode='Markdown')
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast message to all users"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast Your message")
+        return
+    
+    message = ' '.join(context.args)
+    success = 0
+    failed = 0
+    
+    for user_id in user_data:
+        try:
+            await context.bot.send_message(user_id, f"📢 *एडमिन का संदेश:*\n\n{message}", parse_mode='Markdown')
+            success += 1
+        except Exception as e:
+            logger.error(f"Error broadcasting to {user_id}: {e}")
+            failed += 1
+        await asyncio.sleep(0.5)  # Avoid rate limiting
+    
+    await update.message.reply_text(f"📣 ब्रॉडकास्ट रिजल्ट:\n✅ सफल: {success}\n❌ फेल: {failed}")
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check server ping"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    start_time = time.time()
+    message = await update.message.reply_text("🏓 पिंग चेक किया जा रहा है...")
+    end_time = time.time()
+    elapsed_time = round((end_time - start_time) * 1000, 2)
+    
+    await message.edit_text(f"⚡ सर्वर पिंग: {elapsed_time}ms")
+
+async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Block a user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /block <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        blocked_users.add(user_id)
+        await update.message.reply_text(f"✅ यूजर {user_id} को ब्लॉक कर दिया गया!")
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Unblock a user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /unblock <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        blocked_users.discard(user_id)
+        await update.message.reply_text(f"✅ यूजर {user_id} को अनब्लॉक कर दिया!")
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user statistics"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /stats <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        user = user_data.get(user_id)
+        
+        if not user:
+            await update.message.reply_text("❌ यूजर नहीं मिला!")
+            return
+            
+        stats_text = f"""
+📊 *यूजर स्टैट्स* 📊
+
+🆔 ID: {user_id}
+👤 Username: @{user.get('username', 'N/A')}
+📅 ज्वाइन तिथि: {user['join_date'].strftime('%Y-%m-%d %H:%M:%S')}
+✅ वेरीफाईड: {'हाँ' if user['verified'] else 'नहीं'}
+🎬 वीडियो काउंट: {user['video_count']}
+"""
+        await update.message.reply_text(stats_text, parse_mode='Markdown')
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def send_custom_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send custom video to user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /sendvideo <user_id> <video_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        video_id = int(context.args[1])
+        
+        if user_id not in user_data:
+            await update.message.reply_text("❌ यूजर नहीं मिला!")
+            return
+            
+        try:
+            await context.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=CHANNEL_ID,
+                message_id=video_id
+            )
+            user_data[user_id]['video_count'] += 1
+            await update.message.reply_text(f"✅ वीडियो {video_id} यूजर {user_id} को भेज दिया गया!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ वीडियो भेजने में त्रुटि: {e}")
+    except ValueError:
+        await update.message.reply_text("❌ गलत इनपुट फॉर्मेट!")
+
+def main() -> None:
+    """Run bot"""
+    global application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(verify_join, pattern="^verify_join$"))
+    application.add_handler(CallbackQueryHandler(send_videos, pattern="^(get_videos|next_batch)$"))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+    
+    # Admin handlers
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(CommandHandler("block", block_user))
+    application.add_handler(CommandHandler("unblock", unblock_user))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("sendvideo", send_custom_video))
+    
+    # Start bot
+    application.run_polling()
+    logger.info("Bot is running...")
 
 if __name__ == "__main__":
-    try:
-        # Test Telegram connection
-        if send_telegram_message("🔌 <b>Proxy Checker Connection Test</b>\nBot is online and ready!"):
-            log("Telegram connection test successful", "success")
-        else:
-            log("Telegram connection failed - continuing without notifications", "warning")
-        
-        main_loop()
-    except Exception as e:
-        log(f"Fatal error: {str(e)}", "error")
-        send_telegram_message(f"💀 <b>Fatal Error</b>: {str(e)}\nProxy Checker has crashed!")
-        sys.exit(1)
+    main()
