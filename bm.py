@@ -25,12 +25,12 @@ def button(update: Update, context: CallbackContext) -> None:
     if query.data == 'videos':
         # Initialize or reset user progress
         user_progress[user_id] = {'last_sent': 0}
-        send_batch(user_id, query)
+        send_batch(context.bot, user_id, query.message.chat.id)
     
     elif query.data == 'next':
-        send_batch(user_id, query)
+        send_batch(context.bot, user_id, query.message.chat.id)
 
-def send_batch(user_id, query):
+def send_batch(bot, user_id, chat_id):
     if user_id not in user_progress:
         user_progress[user_id] = {'last_sent': 0}
     
@@ -40,8 +40,8 @@ def send_batch(user_id, query):
     
     for msg_id in range(start_msg + 1, end_msg + 1):
         try:
-            query.bot.copy_message(
-                chat_id=query.message.chat.id,
+            bot.copy_message(
+                chat_id=chat_id,
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id
             )
@@ -55,24 +55,28 @@ def send_batch(user_id, query):
         # Add Next button
         keyboard = [[InlineKeyboardButton("Next", callback_data='next')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.bot.send_message(
-            chat_id=query.message.chat.id,
+        bot.send_message(
+            chat_id=chat_id,
             text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
             reply_markup=reply_markup
         )
     else:
-        query.bot.send_message(
-            chat_id=query.message.chat.id,
+        bot.send_message(
+            chat_id=chat_id,
             text="No more videos available or failed to send."
         )
 
 def main() -> None:
-    updater = Updater(BOT_TOKEN)
+    # Create the Updater and pass it your bot's token.
+    updater = Updater(BOT_TOKEN, use_context=True)
+
+    # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CommandHandler('start', start))
     dispatcher.add_handler(CallbackQueryHandler(button))
 
+    # Start the Bot
     updater.start_polling()
     updater.idle()
 
