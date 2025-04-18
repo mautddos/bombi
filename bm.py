@@ -13,10 +13,10 @@ import time
 import os
 import asyncio
 
-# Bot Configuration - UPDATE THESE WITH YOUR ACTUAL VALUES
+# Bot Configuration
 BOT_TOKEN = "8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38"
-CHANNEL_ID = -1001234567890  # Replace with your actual channel ID with videos
-VERIFICATION_CHANNEL = -1001234567891  # Replace with your actual channel ID users must join
+CHANNEL_ID = -1001234567890  # Your channel ID with videos
+VERIFICATION_CHANNEL = -1001234567891  # Channel user must join
 ADMIN_ID = 8167507955  # Your admin ID
 START_IMAGE_URL = "https://t.me/botstomp/125"  # Image for start and next buttons
 
@@ -49,7 +49,7 @@ WELCOME_TEXT = """
 """
 
 VERIFIED_TEXT = """
-💦 *वेरीफाई हो गया! अब तुम्हारी बारी है...* 💦
+💦 *व��रीफाई हो गया! अब तुम्हारी बारी है...* 💦
 
 अनलॉक हुआ:
 🥵 100+ प्राइवेट वीडियो
@@ -98,8 +98,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         'last_sent': 0, 
         'username': username, 
         'join_date': datetime.datetime.now(),
-        'video_count': 0,
-        'last_verify_attempt': 0
+        'video_count': 0
     }
     
     # Notify admin
@@ -113,7 +112,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     keyboard = [
         [InlineKeyboardButton("💋 चैनल ज्वाइन करें", url="https://t.me/+LNs_qcLHlbNkN2E1")],
-        [InlineKeyboardButton("🔥 वेरीफाई करें", callback_data='verify_join')]
+        [InlineKeyboardButton("🔥 वेरीफाई करें", callback_data="verify")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -137,39 +136,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Schedule welcome message deletion after 5 minutes
     asyncio.create_task(delete_after_delay(update.effective_chat.id, sent_message.message_id, 300))
 
-async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Verify channel membership with improved error handling"""
+async def verify_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle verification button click"""
     query = update.callback_query
     await query.answer()
+    
+    if query.data == "verify":
+        await verify_join(update, context)
+
+async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Verify channel membership"""
+    query = update.callback_query
     user_id = query.from_user.id
     
     if user_id in blocked_users:
         await query.edit_message_text("🚫 आपको ब्लॉक कर दिया गया है!")
         return
     
-    # Check verification cooldown
-    if time.time() - user_data[user_id].get('last_verify_attempt', 0) < 10:
-        await query.answer("❌ बहुत जल्दी! 10 सेकंड बाद कोशिश करें", show_alert=True)
-        return
-    
-    user_data[user_id]['last_verify_attempt'] = time.time()
-    
     try:
-        # Check if user is member of verification channel
         member = await context.bot.get_chat_member(VERIFICATION_CHANNEL, user_id)
-        logger.info(f"Verification attempt by user {user_id} - Status: {member.status}")
-        
         if member.status in ['member', 'administrator', 'creator']:
             user_data[user_id]['verified'] = True
-            
-            # Create keyboard for next step
-            keyboard = [
-                [InlineKeyboardButton("💦 20 वीडियो पाएं", callback_data='get_videos')]
-            ]
+            keyboard = [[InlineKeyboardButton("💦 20 वीडियो पाएं", callback_data='get_videos')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Try to edit message with image
             try:
-                # Try to send new message with image
                 await query.message.delete()
                 sent_message = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
@@ -179,40 +171,20 @@ async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Error sending image: {e}")
-                # Fallback to text message
-                sent_message = await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=VERIFIED_TEXT,
+                logger.error(f"Error editing with image: {e}")
+                sent_message = await query.edit_message_text(
+                    VERIFIED_TEXT,
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
             
-            # Schedule deletion
+            # Schedule verification message deletion after 5 minutes
             asyncio.create_task(delete_after_delay(query.message.chat_id, sent_message.message_id, 300))
-            
         else:
-            # User hasn't joined the channel
-            await query.answer(
-                "❌ पहले चैनल ज्वाइन करें फिर वेरीफाई बटन दबाएं!", 
-                show_alert=True
-            )
-            
-            # Show join button again
-            keyboard = [
-                [InlineKeyboardButton("💋 चैनल ज्वाइन करें", url="https://t.me/+LNs_qcLHlbNkN2E1")],
-                [InlineKeyboardButton("🔥 वेरीफाई करें", callback_data='verify_join')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
+            await query.answer("❌ पहले चैनल ज्वाइन करें!", show_alert=True)
     except Exception as e:
-        logger.error(f"Verification error for user {user_id}: {e}")
-        await query.answer(
-            "❌ वेरीफाई नहीं हो पाया. बाद में कोशिश करें.", 
-            show_alert=True
-        )
+        logger.error(f"Verification error: {e}")
+        await query.answer("❌ वेरीफाई नहीं हो पाया. फिर से कोशिश करें.", show_alert=True)
 
 async def send_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send video batch with auto-delete after 60 seconds"""
@@ -297,7 +269,160 @@ async def send_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         asyncio.create_task(delete_after_delay(chat_id, error_message.message_id))
 
-# ... [Keep all your other existing functions unchanged] ...
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show bot status"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    total_users = len(user_data)
+    active_users = sum(1 for user in user_data.values() if user['verified'])
+    total_videos = sum(user['video_count'] for user in user_data.values())
+    
+    status_text = f"""
+📊 *बॉट स्टेटस* 📊
+
+👥 कुल यूजर्स: {total_users}
+💋 एक्टिव यूजर्स: {active_users}
+🚫 ब्लॉक्ड यूजर्स: {len(blocked_users)}
+🎬 भेजे गए वीडियो: {total_videos}
+🆕 आज के नए यूजर्स: {sum(1 for user in user_data.values() if (datetime.datetime.now() - user['join_date']).days == 0)}
+"""
+    await update.message.reply_text(status_text, parse_mode='Markdown')
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast message to all users"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast Your message")
+        return
+    
+    message = ' '.join(context.args)
+    success = 0
+    failed = 0
+    
+    for user_id in user_data:
+        try:
+            await context.bot.send_message(user_id, f"📢 *एडमिन का संदेश:*\n\n{message}", parse_mode='Markdown')
+            success += 1
+        except Exception as e:
+            logger.error(f"Error broadcasting to {user_id}: {e}")
+            failed += 1
+        await asyncio.sleep(0.5)  # Avoid rate limiting
+    
+    await update.message.reply_text(f"📣 ब्रॉडकास्ट रिजल्ट:\n✅ सफल: {success}\n❌ फेल: {failed}")
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check server ping"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    start_time = time.time()
+    message = await update.message.reply_text("🏓 पिंग चेक किया जा रहा है...")
+    end_time = time.time()
+    elapsed_time = round((end_time - start_time) * 1000, 2)
+    
+    await message.edit_text(f"⚡ सर्वर पिंग: {elapsed_time}ms")
+
+async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Block a user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /block <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        blocked_users.add(user_id)
+        await update.message.reply_text(f"✅ यूजर {user_id} को ब्लॉक कर दिया गया!")
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Unblock a user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /unblock <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        blocked_users.discard(user_id)
+        await update.message.reply_text(f"✅ यूजर {user_id} को अनब्लॉक कर दिया!")
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user statistics"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /stats <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        user = user_data.get(user_id)
+        
+        if not user:
+            await update.message.reply_text("❌ यूजर नहीं मिला!")
+            return
+            
+        stats_text = f"""
+📊 *यूजर स्टैट्स* 📊
+
+🆔 ID: {user_id}
+👤 Username: @{user.get('username', 'N/A')}
+📅 ज्वाइन तिथि: {user['join_date'].strftime('%Y-%m-%d %H:%M:%S')}
+✅ वेरीफाईड: {'हाँ' if user['verified'] else 'नहीं'}
+🎬 वीडियो काउंट: {user['video_count']}
+"""
+        await update.message.reply_text(stats_text, parse_mode='Markdown')
+    except ValueError:
+        await update.message.reply_text("❌ गलत यूजर आईडी!")
+
+async def send_custom_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send custom video to user"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ सिर्फ एडमिन के लिए!")
+        return
+    
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /sendvideo <user_id> <video_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        video_id = int(context.args[1])
+        
+        if user_id not in user_data:
+            await update.message.reply_text("❌ यूजर नहीं मिला!")
+            return
+            
+        try:
+            await context.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=CHANNEL_ID,
+                message_id=video_id
+            )
+            user_data[user_id]['video_count'] += 1
+            await update.message.reply_text(f"✅ वीडियो {video_id} यूजर {user_id} को भेज दिया गया!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ वीडियो भेजने में त्रुटि: {e}")
+    except ValueError:
+        await update.message.reply_text("❌ गलत इनपुट फॉर्मेट!")
 
 def main() -> None:
     """Run bot"""
@@ -306,6 +431,7 @@ def main() -> None:
     
     # Handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(verify_button, pattern="^verify$"))
     application.add_handler(CallbackQueryHandler(verify_join, pattern="^verify_join$"))
     application.add_handler(CallbackQueryHandler(send_videos, pattern="^(get_videos|next_batch)$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
