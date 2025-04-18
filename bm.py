@@ -6,10 +6,6 @@ CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
 
-# Image URLs
-START_IMAGE_URL = "https://t.me/botstomp/125"
-NEXT_IMAGE_URL = "https://t.me/botstomp/125"
-
 # Store user progress
 user_progress = {}
 
@@ -31,12 +27,10 @@ Please join our channel first to use this bot:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Send photo with caption
-    await context.bot.send_photo(
-        chat_id=update.message.chat_id,
-        photo=START_IMAGE_URL,
-        caption=welcome_text,
-        reply_markup=reply_markup
+    await update.message.reply_text(
+        text=welcome_text,
+        reply_markup=reply_markup,
+        parse_mode=None  # Disable Markdown parsing
     )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,11 +84,9 @@ async def send_batch(bot, user_id, chat_id):
         user_progress[user_id]['last_sent'] = end_msg
         keyboard = [[InlineKeyboardButton("Next", callback_data='next')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        # Send photo with caption for the "next" button
-        await bot.send_photo(
+        await bot.send_message(
             chat_id=chat_id,
-            photo=NEXT_IMAGE_URL,
-            caption=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
+            text=f"Sent {sent_count} videos. Last sent ID: {end_msg}",
             reply_markup=reply_markup
         )
     else:
