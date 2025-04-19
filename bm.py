@@ -14,10 +14,10 @@ from telegram.ext import (
 )
 
 # Configuration
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8125880528:AAHRUQpcmN645oKmvjt8OeGSGVjG_9Aas38')
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8010650541:AAHONdzGtPgsKtDn772yhMCxV-ukWzHTyrQ')
 CHANNEL_ID = -1002441094491  # Channel where videos are stored
-VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
-CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
+VERIFICATION_CHANNEL_ID = -1001973904304  # Channel users must join
+  # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
 DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
 MAX_CONCURRENT_TASKS = 10  # Limit concurrent video sending tasks per user
@@ -127,7 +127,10 @@ Please join our channel first to use this bot:
 @seedhe_maut
 """
     keyboard = [
-        [InlineKeyboardButton("Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")],
+    [
+        InlineKeyboardButton("Join Channel", url="https://t.me/+kC_WnpSy-icyNmI1"),
+        InlineKeyboardButton("Join Channel", url="https://t.me/+ZyYHoZg-qL0zN2Nl")
+    ],
         [InlineKeyboardButton("✅ I've Joined", callback_data='check_join')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
