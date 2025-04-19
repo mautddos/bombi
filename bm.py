@@ -121,6 +121,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 Here you can get access to our exclusive video collection.
 
+⚠️ <b>Important:</b> Videos are protected content and cannot be saved or forwarded.
+
 Please join our channel first to use this bot:
 @seedhe_maut
 """
@@ -162,7 +164,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 keyboard = [[InlineKeyboardButton("Get Videos", callback_data='videos')]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
-                    text="Thanks for joining! Click below to get videos:",
+                    text="Thanks for joining! Click below to get videos:\n\n⚠️ Note: Videos are protected and cannot be saved or forwarded.",
                     reply_markup=reply_markup
                 )
             else:
@@ -179,14 +181,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(send_batch(context.bot, user_id, query.message.chat.id))
 
 async def send_video_task(bot, user_id, chat_id, msg_id):
-    """Task to send a single video with error handling"""
+    """Task to send a single video with error handling and content protection"""
     try:
         async with task_semaphores[user_id]:
             sent_message = await bot.copy_message(
                 chat_id=chat_id,
                 from_chat_id=CHANNEL_ID,
                 message_id=msg_id,
-                disable_notification=True
+                disable_notification=True,
+                protect_content=True  # This prevents saving/forwarding
             )
             
             # Update user video count
@@ -235,7 +238,7 @@ async def send_batch(bot, user_id, chat_id):
         
         control_message = await bot.send_message(
             chat_id=chat_id,
-            text=f"Sent {sent_count} videos (will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
+            text=f"Sent {sent_count} protected videos (will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
             reply_markup=reply_markup
         )
         # Schedule control message deletion with tracking
@@ -249,8 +252,6 @@ async def send_batch(bot, user_id, chat_id):
         # Schedule error message deletion with tracking
         delete_task = asyncio.create_task(delete_message_after_delay(chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
         sent_messages[user_id].append((chat_id, error_message.message_id, delete_task))
-
-# [Rest of the code remains the same...]
 
 # Admin commands
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -272,6 +273,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"📊 <b>Active Users:</b> {len(user_progress)}\n"
         f"🚫 <b>Blocked Users:</b> {len(blocked_users)}\n"
         f"🎬 <b>Total Videos Sent:</b> {total_videos}\n"
+        f"🔒 <b>Content Protection:</b> Enabled\n"
         f"📅 <b>Last Start:</b> {bot_start_time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     
