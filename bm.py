@@ -135,7 +135,7 @@ async def send_batch(bot, user_id, chat_id):
         user_progress[user_id]['last_sent'] = 0
     
     start_msg = user_progress[user_id]['last_sent']
-    end_msg = start_msg + 10
+    end_msg = start_msg + 100
     sent_count = 0
     
     for msg_id in range(start_msg + 1, end_msg + 1):
