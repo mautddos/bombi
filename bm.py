@@ -20,6 +20,7 @@ VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
 DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
+MAX_CONCURRENT_TASKS = 10  # Limit concurrent video sending tasks per user
 
 # Store user progress and bot data
 user_progress = defaultdict(dict)
@@ -28,6 +29,8 @@ total_users = 0
 blocked_users = set()
 sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id), ...]}
 user_stats = defaultdict(dict)  # {user_id: {'first_seen': datetime, 'last_active': datetime, 'video_count': int}}
+user_tasks = defaultdict(list)  # Track active tasks per user
+task_semaphores = defaultdict(asyncio.Semaphore)  # Limit concurrent tasks per user
 
 # Set up logging
 logging.basicConfig(
@@ -58,6 +61,19 @@ async def cleanup_user_messages(user_id: int):
                 logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
         del sent_messages[user_id]
 
+async def cleanup_user_tasks(user_id: int):
+    """Cancel all active tasks for a user"""
+    if user_id in user_tasks:
+        for task in user_tasks[user_id]:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error in cancelled task for user {user_id}: {e}")
+        user_tasks[user_id].clear()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user.id in blocked_users:
@@ -77,11 +93,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         user_stats[user.id]['last_active'] = datetime.now()
     
+    # Initialize semaphore for this user if not exists
+    if user.id not in task_semaphores:
+        task_semaphores[user.id] = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+    
     # Notify admin about new user
-    await notify_admin(context.bot, f"👤 New user:\nID: {user.id}\nUsername: @{user.username}\nName: {user.full_name}")
+    asyncio.create_task(notify_admin(context.bot, f"👤 New user:\nID: {user.id}\nUsername: @{user.username}\nName: {user.full_name}"))
     
     welcome_text = """
-🎬 <b>Welcome to Video Bot!</b> �
+🎬 <b>Welcome to Video Bot!</b> 🎥
 
 Here you can get access to our exclusive video collection.
 
@@ -136,10 +156,36 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     elif query.data == 'videos':
         user_progress[user_id]['last_sent'] = 0
-        await send_batch(context.bot, user_id, query.message.chat.id)
+        asyncio.create_task(send_batch(context.bot, user_id, query.message.chat.id))
     
     elif query.data == 'next':
-        await send_batch(context.bot, user_id, query.message.chat.id)
+        asyncio.create_task(send_batch(context.bot, user_id, query.message.chat.id))
+
+async def send_video_task(bot, user_id, chat_id, msg_id):
+    """Task to send a single video with error handling"""
+    try:
+        async with task_semaphores[user_id]:
+            sent_message = await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=CHANNEL_ID,
+                message_id=msg_id,
+                disable_notification=True
+            )
+            
+            # Update user video count
+            if user_id in user_stats:
+                user_stats[user_id]['video_count'] = user_stats[user_id].get('video_count', 0) + 1
+            
+            # Schedule video deletion
+            asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+            sent_messages[user_id].append((chat_id, sent_message.message_id))
+            
+            # Small delay between videos
+            await asyncio.sleep(0.3)
+            return True
+    except Exception as e:
+        logger.error(f"Failed to copy message {msg_id} for user {user_id}: {e}")
+        return False
 
 async def send_batch(bot, user_id, chat_id):
     if user_id not in user_progress or 'last_sent' not in user_progress[user_id]:
@@ -149,24 +195,21 @@ async def send_batch(bot, user_id, chat_id):
     end_msg = start_msg + 100
     sent_count = 0
     
+    # Create tasks for sending videos
+    tasks = []
     for msg_id in range(start_msg + 1, end_msg + 1):
-        try:
-            sent_message = await bot.copy_message(
-                chat_id=chat_id,
-                from_chat_id=CHANNEL_ID,
-                message_id=msg_id,
-                disable_notification=True
-            )
-            sent_count += 1
-            # Update user video count
-            if user_id in user_stats:
-                user_stats[user_id]['video_count'] = user_stats[user_id].get('video_count', 0) + 1
-            # Schedule video deletion
-            asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
-            sent_messages[user_id].append((chat_id, sent_message.message_id))
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Failed to copy message {msg_id}: {e}")
+        task = asyncio.create_task(send_video_task(bot, user_id, chat_id, msg_id))
+        tasks.append(task)
+        user_tasks[user_id].append(task)
+    
+    # Wait for all tasks to complete
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Count successful sends
+    sent_count = sum(1 for result in results if result is True)
+    
+    # Clean up completed tasks
+    user_tasks[user_id] = [t for t in user_tasks[user_id] if not t.done()]
     
     if sent_count > 0:
         user_progress[user_id]['last_sent'] = end_msg
@@ -227,6 +270,7 @@ async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         user_id = int(context.args[0])
         blocked_users.add(user_id)
         await cleanup_user_messages(user_id)
+        await cleanup_user_tasks(user_id)
         await update.message.reply_text(f"✅ User {user_id} has been blocked.")
     except ValueError:
         await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
