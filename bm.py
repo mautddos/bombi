@@ -19,14 +19,14 @@ CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
-DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
+DELETE_AFTER_SECONDS = 120  # Auto-delete media after 2 minutes
 
 # Store user progress and bot data
 user_progress = defaultdict(dict)
 bot_start_time = datetime.now()
 total_users = 0
 blocked_users = set()
-sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id, is_media), ...]}
+sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id), ...]}
 
 # Set up logging
 logging.basicConfig(
@@ -38,25 +38,33 @@ logger = logging.getLogger(__name__)
 # Global application reference for cleanup tasks
 application = None
 
-async def delete_message_after_delay(chat_id: int, message_id: int, delay: int, is_media: bool):
-    """Delete a message after specified delay if it's a media message"""
+async def delete_media_after_delay(chat_id: int, message_id: int, delay: int):
+    """Delete only video and image messages after specified delay"""
     await asyncio.sleep(delay)
     try:
-        if is_media:  # Only delete if it's a media message
+        # Get the message first to check its type
+        message = await application.bot.get_message(chat_id=chat_id, message_id=message_id)
+        
+        # Only delete if it's a video or photo
+        if message.video or message.photo:
             await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
             logger.info(f"Deleted media message {message_id} in chat {chat_id}")
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
 
-async def cleanup_user_messages(user_id: int):
-    """Cleanup all scheduled messages for a user"""
+async def cleanup_user_media(user_id: int):
+    """Cleanup all scheduled media messages for a user"""
     if user_id in sent_messages:
-        for chat_id, message_id, is_media in sent_messages[user_id]:
-            if is_media:  # Only try to delete media messages
-                try:
+        for chat_id, message_id in sent_messages[user_id]:
+            try:
+                # Get the message first to check its type
+                message = await application.bot.get_message(chat_id=chat_id, message_id=message_id)
+                
+                # Only delete if it's a video or photo
+                if message.video or message.photo:
                     await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
-                except Exception as e:
-                    logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
         del sent_messages[user_id]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,7 +98,8 @@ Please join our channel first to use this bot:
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
-    # Don't schedule deletion for this text message
+    # Schedule welcome message deletion (not media, so won't be deleted)
+    asyncio.create_task(delete_media_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
 
 async def notify_admin(bot, message: str):
     for admin_id in ADMIN_IDS:
@@ -141,12 +150,6 @@ async def send_batch(bot, user_id, chat_id):
     
     for msg_id in range(start_msg + 1, end_msg + 1):
         try:
-            # First get the message to check its type
-            channel_message = await bot.get_chat_message(chat_id=CHANNEL_ID, message_id=msg_id)
-            
-            # Check if the message contains video or photo
-            is_media = bool(channel_message.video or channel_message.photo)
-            
             sent_message = await bot.copy_message(
                 chat_id=chat_id,
                 from_chat_id=CHANNEL_ID,
@@ -154,11 +157,9 @@ async def send_batch(bot, user_id, chat_id):
                 disable_notification=True
             )
             sent_count += 1
-            
-            # Schedule deletion only for media messages
-            if is_media:
-                asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS, is_media))
-                sent_messages[user_id].append((chat_id, sent_message.message_id, is_media))
+            # Schedule media deletion (only if it's video or photo)
+            asyncio.create_task(delete_media_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+            sent_messages[user_id].append((chat_id, sent_message.message_id))
             await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Failed to copy message {msg_id}: {e}")
@@ -173,17 +174,112 @@ async def send_batch(bot, user_id, chat_id):
             text=f"Sent {sent_count} videos (media will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
             reply_markup=reply_markup
         )
-        # Don't schedule deletion for this control message
-        sent_messages[user_id].append((chat_id, control_message.message_id, False))
+        # Control message is not media, so it won't be auto-deleted
+        sent_messages[user_id].append((chat_id, control_message.message_id))
     else:
         error_message = await bot.send_message(
             chat_id=chat_id,
             text="No more videos available or failed to send."
         )
-        # Don't schedule deletion for this error message
-        sent_messages[user_id].append((chat_id, error_message.message_id, False))
+        # Error message is not media, so it won't be auto-deleted
+        sent_messages[user_id].append((chat_id, error_message.message_id))
 
-# [Rest of the code remains the same...]
+# Admin commands (unchanged from original)
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    uptime = datetime.now() - bot_start_time
+    days, seconds = uptime.days, uptime.seconds
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    
+    status_text = (
+        f"🤖 <b>Bot Status</b>\n\n"
+        f"⏳ <b>Uptime:</b> {days}d {hours}h {minutes}m {seconds}s\n"
+        f"👥 <b>Total Users:</b> {total_users}\n"
+        f"📊 <b>Active Users:</b> {len(user_progress)}\n"
+        f"🚫 <b>Blocked Users:</b> {len(blocked_users)}\n"
+        f"📅 <b>Last Start:</b> {bot_start_time.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    
+    await update.message.reply_text(status_text, parse_mode='HTML')
+
+async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /block <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        blocked_users.add(user_id)
+        await cleanup_user_media(user_id)
+        await update.message.reply_text(f"✅ User {user_id} has been blocked.")
+    except ValueError:
+        await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
+
+async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /unblock <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+        if user_id in blocked_users:
+            blocked_users.remove(user_id)
+            await update.message.reply_text(f"✅ User {user_id} has been unblocked.")
+        else:
+            await update.message.reply_text(f"User {user_id} is not blocked.")
+    except ValueError:
+        await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+    
+    message = ' '.join(context.args)
+    success = 0
+    failed = 0
+    
+    for user_id in user_progress:
+        try:
+            await context.bot.send_message(chat_id=user_id, text=message)
+            success += 1
+            await asyncio.sleep(0.1)  # Rate limiting
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to {user_id}: {e}")
+            failed += 1
+    
+    await update.message.reply_text(
+        f"📢 Broadcast completed:\n"
+        f"✅ Success: {success}\n"
+        f"❌ Failed: {failed}"
+    )
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    
+    if update and hasattr(update, 'effective_user'):
+        user_id = update.effective_user.id
+        try:
+            error_message = await context.bot.send_message(
+                chat_id=user_id,
+                text="Sorry, an error occurred. Please try again later."
+            )
+            # Error message is not media, so it won't be auto-deleted
+        except Exception:
+            pass
 
 def main() -> None:
     global application
