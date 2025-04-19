@@ -130,7 +130,7 @@ Please join our channel first to use this bot:
     [
         InlineKeyboardButton("Join Channel", url="https://t.me/+kC_WnpSy-icyNmI1"),
         InlineKeyboardButton("Join Channel", url="https://t.me/+ZyYHoZg-qL0zN2Nl"),
-        InlineKeyboardButton("Join Channel", url="https://t.me/DARKMETHODHUBl")
+        InlineKeyboardButton("Join Channel", url="https://t.me/DARKMETHODHUB")
     ],
         [InlineKeyboardButton("✅ I've Joined", callback_data='check_join')]
     ]
@@ -175,7 +175,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await query.edit_message_text(text="Please join the channel first to access videos.")
         except Exception as e:
             logger.error(f"Error checking membership: {e}")
-            await query.edit_message_text(text="Couldn't verify your channel membership. Please try again.")
+            await query.edit_message_text(text="Couldn't verify your channel membership. Please try again /start.")
     
     elif query.data == 'videos':
         user_progress[user_id]['last_sent'] = 0
