@@ -19,7 +19,7 @@ CHANNEL_ID = -1002441094491  # Channel where videos are stored
 VERIFICATION_CHANNEL_ID = -1002363906868  # Channel users must join
 CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
-DELETE_AFTER_SECONDS = 120  # Auto-delete media after 2 minutes
+DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
 
 # Store user progress and bot data
 user_progress = defaultdict(dict)
@@ -27,6 +27,7 @@ bot_start_time = datetime.now()
 total_users = 0
 blocked_users = set()
 sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id), ...]}
+user_stats = defaultdict(dict)  # {user_id: {'first_seen': datetime, 'last_active': datetime, 'video_count': int}}
 
 # Set up logging
 logging.basicConfig(
@@ -38,31 +39,21 @@ logger = logging.getLogger(__name__)
 # Global application reference for cleanup tasks
 application = None
 
-async def delete_media_after_delay(chat_id: int, message_id: int, delay: int):
-    """Delete only video and image messages after specified delay"""
+async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
+    """Delete a message after specified delay"""
     await asyncio.sleep(delay)
     try:
-        # Get the message first to check its type
-        message = await application.bot.get_message(chat_id=chat_id, message_id=message_id)
-        
-        # Only delete if it's a video or photo
-        if message.video or message.photo:
-            await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            logger.info(f"Deleted media message {message_id} in chat {chat_id}")
+        await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"Deleted message {message_id} in chat {chat_id}")
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
 
-async def cleanup_user_media(user_id: int):
-    """Cleanup all scheduled media messages for a user"""
+async def cleanup_user_messages(user_id: int):
+    """Cleanup all scheduled messages for a user"""
     if user_id in sent_messages:
         for chat_id, message_id in sent_messages[user_id]:
             try:
-                # Get the message first to check its type
-                message = await application.bot.get_message(chat_id=chat_id, message_id=message_id)
-                
-                # Only delete if it's a video or photo
-                if message.video or message.photo:
-                    await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
             except Exception as e:
                 logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
         del sent_messages[user_id]
@@ -74,13 +65,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     
     global total_users
-    total_users += 1
+    if user.id not in user_stats:
+        total_users += 1
+        user_stats[user.id] = {
+            'first_seen': datetime.now(),
+            'last_active': datetime.now(),
+            'video_count': 0,
+            'username': user.username,
+            'full_name': user.full_name
+        }
+    else:
+        user_stats[user.id]['last_active'] = datetime.now()
     
     # Notify admin about new user
     await notify_admin(context.bot, f"👤 New user:\nID: {user.id}\nUsername: @{user.username}\nName: {user.full_name}")
     
     welcome_text = """
-🎬 <b>Welcome to Video Bot!</b> 🎬
+🎬 <b>Welcome to Video Bot!</b> �
 
 Here you can get access to our exclusive video collection.
 
@@ -98,8 +99,8 @@ Please join our channel first to use this bot:
         reply_markup=reply_markup,
         parse_mode='HTML'
     )
-    # Schedule welcome message deletion (not media, so won't be deleted)
-    asyncio.create_task(delete_media_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+    # Schedule welcome message deletion
+    asyncio.create_task(delete_message_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
 
 async def notify_admin(bot, message: str):
     for admin_id in ADMIN_IDS:
@@ -157,8 +158,11 @@ async def send_batch(bot, user_id, chat_id):
                 disable_notification=True
             )
             sent_count += 1
-            # Schedule media deletion (only if it's video or photo)
-            asyncio.create_task(delete_media_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+            # Update user video count
+            if user_id in user_stats:
+                user_stats[user_id]['video_count'] = user_stats[user_id].get('video_count', 0) + 1
+            # Schedule video deletion
+            asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
             sent_messages[user_id].append((chat_id, sent_message.message_id))
             await asyncio.sleep(0.5)
         except Exception as e:
@@ -171,20 +175,22 @@ async def send_batch(bot, user_id, chat_id):
         
         control_message = await bot.send_message(
             chat_id=chat_id,
-            text=f"Sent {sent_count} videos (media will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
+            text=f"Sent {sent_count} videos (will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
             reply_markup=reply_markup
         )
-        # Control message is not media, so it won't be auto-deleted
+        # Schedule control message deletion
+        asyncio.create_task(delete_message_after_delay(chat_id, control_message.message_id, DELETE_AFTER_SECONDS))
         sent_messages[user_id].append((chat_id, control_message.message_id))
     else:
         error_message = await bot.send_message(
             chat_id=chat_id,
             text="No more videos available or failed to send."
         )
-        # Error message is not media, so it won't be auto-deleted
+        # Schedule error message deletion
+        asyncio.create_task(delete_message_after_delay(chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
         sent_messages[user_id].append((chat_id, error_message.message_id))
 
-# Admin commands (unchanged from original)
+# Admin commands
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -195,12 +201,15 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     minutes = (seconds % 3600) // 60
     seconds = seconds % 60
     
+    total_videos = sum(stats.get('video_count', 0) for stats in user_stats.values())
+    
     status_text = (
         f"🤖 <b>Bot Status</b>\n\n"
         f"⏳ <b>Uptime:</b> {days}d {hours}h {minutes}m {seconds}s\n"
         f"👥 <b>Total Users:</b> {total_users}\n"
         f"📊 <b>Active Users:</b> {len(user_progress)}\n"
         f"🚫 <b>Blocked Users:</b> {len(blocked_users)}\n"
+        f"🎬 <b>Total Videos Sent:</b> {total_videos}\n"
         f"📅 <b>Last Start:</b> {bot_start_time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     
@@ -217,7 +226,7 @@ async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         user_id = int(context.args[0])
         blocked_users.add(user_id)
-        await cleanup_user_media(user_id)
+        await cleanup_user_messages(user_id)
         await update.message.reply_text(f"✅ User {user_id} has been blocked.")
     except ValueError:
         await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
@@ -267,6 +276,83 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"❌ Failed: {failed}"
     )
 
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all users with their details"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    if not user_stats:
+        await update.message.reply_text("No users found.")
+        return
+    
+    message = "👥 <b>User List</b>:\n\n"
+    for user_id, stats in user_stats.items():
+        first_seen = stats.get('first_seen', datetime.now())
+        last_active = stats.get('last_active', datetime.now())
+        usage_time = last_active - first_seen
+        days = usage_time.days
+        hours, remainder = divmod(usage_time.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        
+        message += (
+            f"🆔 <b>ID</b>: {user_id}\n"
+            f"👤 <b>Name</b>: {stats.get('full_name', 'N/A')}\n"
+            f"📛 <b>Username</b>: @{stats.get('username', 'N/A')}\n"
+            f"⏱ <b>Usage Time</b>: {days}d {hours}h {minutes}m\n"
+            f"🎬 <b>Videos Watched</b>: {stats.get('video_count', 0)}\n"
+            f"📅 <b>First Seen</b>: {first_seen.strftime('%Y-%m-%d %H:%M')}\n"
+            f"🔍 <b>Last Active</b>: {last_active.strftime('%Y-%m-%d %H:%M')}\n"
+            f"🚫 <b>Blocked</b>: {'Yes' if user_id in blocked_users else 'No'}\n"
+            f"────────────────────\n"
+        )
+    
+    # Telegram has a message length limit, so we might need to split
+    if len(message) > 4096:
+        parts = [message[i:i+4096] for i in range(0, len(message), 4096)]
+        for part in parts:
+            await update.message.reply_text(part, parse_mode='HTML')
+            await asyncio.sleep(0.5)
+    else:
+        await update.message.reply_text(message, parse_mode='HTML')
+
+async def user_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show statistics about user activity"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    if not user_stats:
+        await update.message.reply_text("No user statistics available.")
+        return
+    
+    total_videos = sum(stats.get('video_count', 0) for stats in user_stats.values())
+    active_users = len([uid for uid in user_stats if uid not in blocked_users])
+    avg_videos = total_videos / len(user_stats) if len(user_stats) > 0 else 0
+    
+    # Find top users by video count
+    top_users = sorted(
+        [(uid, stats) for uid, stats in user_stats.items()],
+        key=lambda x: x[1].get('video_count', 0),
+        reverse=True
+    )[:5]
+    
+    message = (
+        f"📊 <b>User Statistics</b>\n\n"
+        f"👥 <b>Total Users</b>: {len(user_stats)}\n"
+        f"🔄 <b>Active Users</b>: {active_users}\n"
+        f"🚫 <b>Blocked Users</b>: {len(blocked_users)}\n"
+        f"🎬 <b>Total Videos Sent</b>: {total_videos}\n"
+        f"📈 <b>Average Videos per User</b>: {avg_videos:.1f}\n\n"
+        f"🏆 <b>Top Users by Video Count</b>:\n"
+    )
+    
+    for i, (user_id, stats) in enumerate(top_users, 1):
+        message += (
+            f"{i}. {stats.get('full_name', 'N/A')} (@{stats.get('username', 'N/A')})\n"
+            f"   🆔: {user_id} | 🎬: {stats.get('video_count', 0)}\n"
+        )
+    
+    await update.message.reply_text(message, parse_mode='HTML')
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
     
@@ -277,7 +363,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 chat_id=user_id,
                 text="Sorry, an error occurred. Please try again later."
             )
-            # Error message is not media, so it won't be auto-deleted
+            # Schedule error message deletion
+            asyncio.create_task(delete_message_after_delay(error_message.chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
         except Exception:
             pass
 
@@ -294,6 +381,8 @@ def main() -> None:
     application.add_handler(CommandHandler('block', block_user))
     application.add_handler(CommandHandler('unblock', unblock_user))
     application.add_handler(CommandHandler('broadcast', broadcast))
+    application.add_handler(CommandHandler('users', list_users))
+    application.add_handler(CommandHandler('stats', user_stats_command))
     
     # Error handler
     application.add_error_handler(error_handler)
