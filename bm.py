@@ -16,7 +16,7 @@ from telegram.ext import (
 # Configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8010650541:AAHONdzGtPgsKtDn772yhMCxV-ukWzHTyrQ')
 CHANNEL_ID = -1002441094491  # Channel where videos are stored
-VERIFICATION_CHANNEL_ID = [-1001973904304, -1002456377052]  # List of channel IDs  # Channel users must join
+VERIFICATION_CHANNEL_ID = -1001973904304 # List of channel IDs  # Channel users must join
   # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
 DELETE_AFTER_SECONDS = 14400  # Auto-delete messages after 2 minutes
