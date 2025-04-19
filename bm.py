@@ -21,13 +21,14 @@ CHANNEL_USERNAME = "seedhe_maut"  # Without @ symbol
 ADMIN_IDS = {8167507955}  # Admin user IDs
 DELETE_AFTER_SECONDS = 120  # Auto-delete messages after 2 minutes
 MAX_CONCURRENT_TASKS = 10  # Limit concurrent video sending tasks per user
+MAX_DELETE_RETRIES = 3  # Max attempts to delete a message
 
 # Store user progress and bot data
 user_progress = defaultdict(dict)
 bot_start_time = datetime.now()
 total_users = 0
 blocked_users = set()
-sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id), ...]}
+sent_messages = defaultdict(list)  # {user_id: [(chat_id, message_id, delete_task), ...]}
 user_stats = defaultdict(dict)  # {user_id: {'first_seen': datetime, 'last_active': datetime, 'video_count': int}}
 user_tasks = defaultdict(list)  # Track active tasks per user
 task_semaphores = defaultdict(asyncio.Semaphore)  # Limit concurrent tasks per user
@@ -42,36 +43,51 @@ logger = logging.getLogger(__name__)
 # Global application reference for cleanup tasks
 application = None
 
+async def delete_message_with_retry(chat_id: int, message_id: int):
+    """Delete a message with retry logic"""
+    for attempt in range(MAX_DELETE_RETRIES):
+        try:
+            await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            logger.info(f"Successfully deleted message {message_id} in chat {chat_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1} failed to delete message {message_id}: {e}")
+            if attempt < MAX_DELETE_RETRIES - 1:
+                await asyncio.sleep(2)  # Wait before retrying
+    return False
+
 async def delete_message_after_delay(chat_id: int, message_id: int, delay: int):
-    """Delete a message after specified delay"""
-    await asyncio.sleep(delay)
+    """Delete a message after specified delay with proper error handling"""
     try:
-        await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        logger.info(f"Deleted message {message_id} in chat {chat_id}")
+        await asyncio.sleep(delay)
+        await delete_message_with_retry(chat_id, message_id)
     except Exception as e:
-        logger.error(f"Failed to delete message {message_id}: {e}")
+        logger.error(f"Failed in delete_message_after_delay for message {message_id}: {e}")
 
 async def cleanup_user_messages(user_id: int):
     """Cleanup all scheduled messages for a user"""
     if user_id in sent_messages:
-        for chat_id, message_id in sent_messages[user_id]:
+        for chat_id, message_id, delete_task in sent_messages[user_id]:
             try:
-                await application.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                if not delete_task.done():
+                    delete_task.cancel()
+                await delete_message_with_retry(chat_id, message_id)
             except Exception as e:
-                logger.error(f"Failed to delete message {message_id} for user {user_id}: {e}")
-        del sent_messages[user_id]
+                logger.error(f"Failed to cleanup message {message_id} for user {user_id}: {e}")
+        sent_messages[user_id].clear()
 
 async def cleanup_user_tasks(user_id: int):
     """Cancel all active tasks for a user"""
     if user_id in user_tasks:
         for task in user_tasks[user_id]:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Error in cancelled task for user {user_id}: {e}")
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error in cancelled task for user {user_id}: {e}")
         user_tasks[user_id].clear()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,7 +136,8 @@ Please join our channel first to use this bot:
         parse_mode='HTML'
     )
     # Schedule welcome message deletion
-    asyncio.create_task(delete_message_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+    delete_task = asyncio.create_task(delete_message_after_delay(sent_message.chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+    sent_messages[user.id].append((sent_message.chat_id, sent_message.message_id, delete_task))
 
 async def notify_admin(bot, message: str):
     for admin_id in ADMIN_IDS:
@@ -176,9 +193,9 @@ async def send_video_task(bot, user_id, chat_id, msg_id):
             if user_id in user_stats:
                 user_stats[user_id]['video_count'] = user_stats[user_id].get('video_count', 0) + 1
             
-            # Schedule video deletion
-            asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
-            sent_messages[user_id].append((chat_id, sent_message.message_id))
+            # Schedule video deletion with proper tracking
+            delete_task = asyncio.create_task(delete_message_after_delay(chat_id, sent_message.message_id, DELETE_AFTER_SECONDS))
+            sent_messages[user_id].append((chat_id, sent_message.message_id, delete_task))
             
             # Small delay between videos
             await asyncio.sleep(0.3)
@@ -221,17 +238,19 @@ async def send_batch(bot, user_id, chat_id):
             text=f"Sent {sent_count} videos (will auto-delete in {DELETE_AFTER_SECONDS//60} mins).",
             reply_markup=reply_markup
         )
-        # Schedule control message deletion
-        asyncio.create_task(delete_message_after_delay(chat_id, control_message.message_id, DELETE_AFTER_SECONDS))
-        sent_messages[user_id].append((chat_id, control_message.message_id))
+        # Schedule control message deletion with tracking
+        delete_task = asyncio.create_task(delete_message_after_delay(chat_id, control_message.message_id, DELETE_AFTER_SECONDS))
+        sent_messages[user_id].append((chat_id, control_message.message_id, delete_task))
     else:
         error_message = await bot.send_message(
             chat_id=chat_id,
             text="No more videos available or failed to send."
         )
-        # Schedule error message deletion
-        asyncio.create_task(delete_message_after_delay(chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
-        sent_messages[user_id].append((chat_id, error_message.message_id))
+        # Schedule error message deletion with tracking
+        delete_task = asyncio.create_task(delete_message_after_delay(chat_id, error_message.message_id, DELETE_AFTER_SECONDS))
+        sent_messages[user_id].append((chat_id, error_message.message_id, delete_task))
+
+# [Rest of the code remains the same...]
 
 # Admin commands
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
