@@ -1,89 +1,58 @@
+import os
 import time
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException
-import os
+from webdriver_manager.chrome import ChromeDriverManager
 
-def get_user_credentials():
-    """Prompt user to enter email and password securely."""
-    print("\n🔐 Enter Terabox Login Credentials")
-    email = input("📧 Email: ").strip()
-    password = input("🔑 Password: ").strip()
-    
-    if not email or not password:
-        raise ValueError("❌ Email and password cannot be empty!")
-    return email, password
+# 1. Enter your credentials manually
+TERABOX_EMAIL = "combill925@gmail.com"
+TERABOX_PASSWORD = "www.chut.com"
 
-def setup_driver():
-    """Configure Chrome WebDriver for Linux."""
-    chrome_options = Options()
-    chrome_options.add_argument("--disable-notifications")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--no-sandbox")  # Needed for Linux
-    chrome_options.add_argument("--disable-dev-shm-usage")  # Needed for Linux
-    
-    # For headless mode (uncomment if needed)
-    # chrome_options.add_argument("--headless=new")
-    
-    # Path to ChromeDriver (Linux version)
-    service = Service(executable_path="/usr/bin/chromedriver")
-    
-    return webdriver.Chrome(service=service, options=chrome_options)
+# 2. Setup Chrome Options
+chrome_options = Options()
+chrome_options.add_argument("--headless")  # Run without GUI
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
 
-def terabox_login(driver, email, password):
-    """Perform Terabox login and return session cookies."""
+# 3. Install and use proper chromedriver
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=chrome_options)
+
+try:
+    # 4. Go to Terabox website
+    driver.get("https://www.terabox.com")
+    time.sleep(3)  # Wait for page load
+
+    # 5. Login process
+    email_input = driver.find_element(By.NAME, "username")  # Check if selector is correct
+    password_input = driver.find_element(By.NAME, "password")
+    email_input.send_keys(TERABOX_EMAIL)
+    password_input.send_keys(TERABOX_PASSWORD)
+
+    # Click login button
+    login_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Login')]")
+    login_button.click()
+    time.sleep(5)
+
+    # 6. Confirm login
     try:
-        driver.get("https://www.terabox.com")
-        time.sleep(3)  # Wait for page load
+        profile_element = driver.find_element(By.CLASS_NAME, "user-profile")
+        print("✅ Login successful!")
+    except NoSuchElementException:
+        print("❌ Login failed. Check credentials or site structure.")
 
-        # Find email & password fields (adjust selectors if needed)
-        email_input = driver.find_element(By.NAME, "username")
-        password_input = driver.find_element(By.NAME, "password")
+    # 7. Print session cookies
+    cookies = driver.get_cookies()
+    print("\n🔒 Session Cookies:")
+    for cookie in cookies:
+        print(f"{cookie['name']}: {cookie['value']}")
 
-        email_input.send_keys(email)
-        password_input.send_keys(password)
+except Exception as e:
+    print(f"❌ Error: {e}")
 
-        # Click login button
-        login_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Login')]")
-        login_button.click()
-        time.sleep(5)  # Wait for login
-
-        # Check if login was successful
-        try:
-            profile_element = driver.find_element(By.CLASS_NAME, "user-profile")
-            print("✅ Login successful!")
-            return driver.get_cookies()  # Return session cookies
-        except NoSuchElementException:
-            print("❌ Login failed. Check credentials or website structure.")
-            return None
-
-    except Exception as e:
-        print(f"❌ Error during login: {e}")
-        return None
-
-def main():
-    print("\n🚀 Terabox Login Automation")
-    print("=" * 30)
-    
-    # Get credentials from user
-    email, password = get_user_credentials()
-    
-    # Initialize WebDriver
-    driver = setup_driver()
-    
-    try:
-        # Perform login
-        cookies = terabox_login(driver, email, password)
-        
-        if cookies:
-            print("\n🔒 Session Cookies (Do NOT share!):")
-            for cookie in cookies:
-                print(f"{cookie['name']}: {cookie['value']}")
-    
-    finally:
-        driver.quit()  # Close browser
-
-if __name__ == "__main__":
-    main()
+finally:
+    driver.quit()
