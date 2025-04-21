@@ -10,18 +10,22 @@ import undetected_chromedriver as uc
 
 # Configuration
 MAX_THREADS = 5
-MAX_RETRIES = 3  # Max retries per view attempt
+MAX_RETRIES = 3
 PROXY_TIMEOUT = 20
-VIEW_DELAY = (15, 30)  # Random delay between views
+VIEW_DELAY = (15, 30)
 
-# Premium proxy sources (free proxies often fail)
+# Declare as global first
+global PROXY_LIST
+PROXY_LIST = []
+
+# Premium proxy sources
 PROXY_SOURCES = [
     "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
 ]
 
-# Get fresh proxies
 def refresh_proxies():
+    global PROXY_LIST  # Now properly declared
     proxies = []
     for url in PROXY_SOURCES:
         try:
@@ -29,11 +33,12 @@ def refresh_proxies():
             proxies.extend([p.strip() for p in response.text.splitlines() if p.strip()])
         except:
             continue
-    return list(set(proxies))[:200]  # Return unique proxies
+    PROXY_LIST = list(set(proxies))[:200]
+    print(f"🌀 Loaded {len(PROXY_LIST)} proxies")
 
-PROXY_LIST = refresh_proxies()
-print(f"🌀 Loaded {len(PROXY_LIST)} proxies")
+refresh_proxies()  # Initial load
 
+# Rest of your code remains the same...
 # User agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
