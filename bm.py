@@ -1,11 +1,8 @@
 import time
 import random
 import threading
-from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from webdriver_manager.chrome import ChromeDriverManager
 import undetected_chromedriver as uc
 
 # प्रॉक्सी लिस्ट (अपनी प्रॉक्सी डालें)
@@ -26,10 +23,11 @@ def setup_driver():
     options = uc.ChromeOptions()
     
     # प्रॉक्सी सेटअप
-    proxy = random.choice(PROXY_LIST)
-    options.add_argument(f'--proxy-server=http://{proxy}')
+    if PROXY_LIST:
+        proxy = random.choice(PROXY_LIST)
+        options.add_argument(f'--proxy-server=http://{proxy}')
     
-    # हेडलेस मोड (चुपके ��े चलने के लिए)
+    # हेडलेस मोड (चुपके से चलने के लिए)
     options.add_argument('--headless=new')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
@@ -40,7 +38,10 @@ def setup_driver():
     options.add_argument(f'user-agent={user_agent}')
     
     # बॉट डिटेक्शन से बचाव
-    driver = uc.Chrome(options=options)
+    driver = uc.Chrome(
+        options=options,
+        use_subprocess=True,
+    )
     return driver
 
 def human_like_actions(driver):
@@ -57,7 +58,7 @@ def human_like_actions(driver):
             random.choice(buttons).click()
             time.sleep(random.uniform(1, 3))
         
-        # कीबोर्ड की रैंडम की प्रेस (SPACE, DOWN ARROW)
+        # कीबोर्ड की रैंडम की प्रेस
         actions = ActionChains(driver)
         actions.send_keys(Keys.SPACE).pause(1).send_keys(Keys.ARROW_DOWN).perform()
     except:
@@ -72,7 +73,7 @@ def send_view(link):
         # ह्यूमन जैसी एक्टिविटीज
         human_like_actions(driver)
         
-        # वीडियो चलाने की कोशिश (अगर प्ले बटन मिले)
+        # वीडियो चलाने की कोशिश
         try:
             play_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Play']")
             play_button.click()
@@ -80,13 +81,25 @@ def send_view(link):
         except:
             pass
         
-        print("✅ व्यू भेजा गया! (IP: " + driver.execute_script("return JSON.stringify(await fetch('https://api.ipify.org?format=json').then(res => res.json()))") + ")")
+        print(f"✅ व्यू भेजा गया! (Session: {driver.session_id})")
         return True
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"❌ ERROR: {str(e)[:100]}...")
         return False
     finally:
         driver.quit()
+
+def worker(link, views_per_thread):
+    for i in range(views_per_thread):
+        print(f"📡 {threading.current_thread().name} - व्यू {i+1} भेजा जा रहा है...")
+        success = send_view(link)
+        if not success:
+            print("⚠️ रिपीट करने का प्रयास...")
+            time.sleep(5)
+            send_view(link)
+        wait_time = random.randint(15, 30)
+        print(f"⏳ अगले व्यू से पहले {wait_time} सेकंड इंतज़ार...")
+        time.sleep(wait_time)
 
 def main():
     print("""
@@ -101,27 +114,20 @@ def main():
     """)
     
     link = input("Terabox Video Link: ").strip()
-    views = int(input("कितने व्यूज भेजने हैं?: "))
-    threads = int(input("कितने थ्रेड्स चलाने हैं? (ज्यादा = तेज, लेकिन CPU उपयोग बढ़ेगा): "))
+    total_views = int(input("कितने व्यूज भेजने हैं?: "))
+    threads = int(input("कितने थ्रेड्स चलाने हैं? (ज्यादा = तेज): "))
     
-    print("\n🚀 बॉट शुरू हो रहा है...\n")
-    
-    def worker():
-        for i in range(views // threads):
-            print(f"📡 {threading.current_thread().name} - व्यू {i+1} भेजा जा रहा है...")
-            success = send_view(link)
-            if not success:
-                print("⚠️ रिपीट करने का प्रयास...")
-                time.sleep(5)
-                send_view(link)
-            wait_time = random.randint(15, 30)
-            print(f"⏳ अगले व्यू से पहले {wait_time} सेकंड इंतज़ार...")
-            time.sleep(wait_time)
+    views_per_thread = total_views // threads
+    print(f"\n🚀 प्रत्येक थ्रेड {views_per_thread} व्यूज भेजेगा...\n")
     
     # मल्टी-थ्रेडिंग शुरू करें
     all_threads = []
-    for _ in range(threads):
-        t = threading.Thread(target=worker)
+    for i in range(threads):
+        t = threading.Thread(
+            target=worker,
+            args=(link, views_per_thread),
+            name=f"Thread-{i+1}"
+        )
         t.start()
         all_threads.append(t)
     
