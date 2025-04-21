@@ -2,38 +2,39 @@ import time
 import random
 import threading
 import requests
+import os
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 import undetected_chromedriver as uc
-import os
 
 # Configuration
-MAX_THREADS = 5  # Reduced further for stability
+MAX_THREADS = 5  # Reduced for stability with free proxies
 VIEWS_PER_THREAD = 1
 PROXY_TIMEOUT = 30
-RETRY_DELAY = 10  # Seconds between retries
+CHROME_VERSION = 114  # Specific Chrome version to use
 
-# Create directory for chromedriver if it doesn't exist
-os.makedirs('/tmp/chromedriver', exist_ok=True)
-
+# Free proxy sources
 def get_free_proxies():
     try:
-        sources = [
+        urls = [
             "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
-            "https://www.proxy-list.download/api/v1/get?type=http",
-            "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"
+            "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
         ]
         proxies = []
-        for url in sources:
+        for url in urls:
             try:
                 response = requests.get(url, timeout=10)
                 proxies.extend([p.strip() for p in response.text.splitlines() if p.strip()])
             except:
                 continue
-        return list(set(proxies))  # Remove duplicates
+        return list(set(proxies))[:100]  # Return unique proxies, max 100
     except:
-        return []
+        return [
+            "103.155.217.1:41367",  # Fallback proxies
+            "45.43.31.145:3128",
+            "47.88.29.108:8080"
+        ]
 
 PROXY_LIST = get_free_proxies()
 print(f"🛜 Loaded {len(PROXY_LIST)} proxies")
@@ -65,16 +66,17 @@ class ViewCounter:
 
 view_counter = ViewCounter()
 
-def setup_driver(thread_num):
+def setup_driver():
     options = uc.ChromeOptions()
     
-    # Set different user data dir for each thread
-    options.add_argument(f'--user-data-dir=/tmp/chromedriver/thread_{thread_num}')
-    
-    # Random window size
-    width = random.randint(1200, 1920)
-    height = random.randint(800, 1080)
-    options.add_argument(f'--window-size={width},{height}')
+    # Clear ChromeDriver cache to prevent "Text file busy" errors
+    cache_dir = os.path.expanduser('~/.local/share/undetected_chromedriver')
+    if os.path.exists(cache_dir):
+        for f in os.listdir(cache_dir):
+            try:
+                os.remove(os.path.join(cache_dir, f))
+            except:
+                pass
     
     if PROXY_LIST:
         proxy = random.choice(PROXY_LIST)
@@ -92,82 +94,67 @@ def setup_driver(thread_num):
         driver = uc.Chrome(
             options=options,
             use_subprocess=True,
-            version_main=114,
-            driver_executable_path='/usr/bin/chromedriver'  # Explicit path
+            version_main=CHROME_VERSION,
+            driver_executable_path='/usr/local/bin/chromedriver'  # Explicit path
         )
         return driver
     except Exception as e:
-        print(f"🚨 [Thread-{thread_num}] Driver Error: {str(e)[:100]}")
+        print(f"🚨 Driver Error: {str(e)[:100]}")
         return None
 
 def human_like_actions(driver):
     try:
-        # Random mouse movements
-        actions = ActionChains(driver)
-        for _ in range(random.randint(2, 5)):
-            x_offset = random.randint(-100, 100)
-            y_offset = random.randint(-100, 100)
-            actions.move_by_offset(x_offset, y_offset).perform()
-            time.sleep(random.uniform(0.2, 0.8))
-        
         # Random scrolling
-        scrolls = random.randint(3, 7)
-        for i in range(scrolls):
-            scroll_px = random.randint(300, 800) * (1 if i % 2 == 0 else -1)
+        for _ in range(random.randint(3, 7)):
+            scroll_px = random.randint(300, 800)
             driver.execute_script(f"window.scrollBy(0, {scroll_px})")
-            time.sleep(random.uniform(0.5, 1.5))
+            time.sleep(random.uniform(0.3, 1.5))
         
         # Random clicks
-        try:
-            buttons = driver.find_elements(By.TAG_NAME, "button")
-            if buttons:
-                btn = random.choice(buttons)
-                actions.move_to_element(btn).pause(0.5).click().perform()
-                time.sleep(random.uniform(1, 3))
-        except:
-            pass
-    except Exception as e:
+        buttons = driver.find_elements(By.TAG_NAME, "button")
+        if buttons:
+            random.choice(buttons).click()
+            time.sleep(random.uniform(0.5, 2))
+        
+        # Keyboard actions
+        actions = ActionChains(driver)
+        actions.send_keys(Keys.SPACE).pause(1).send_keys(Keys.ARROW_DOWN).perform()
+    except:
         pass
 
-def send_view(link, thread_num, attempt=1):
-    if attempt > 3:  # Max 3 attempts
+def send_view(link, thread_num):
+    driver = setup_driver()
+    if not driver:
         view_counter.increment(success=False)
         return False
-
-    driver = setup_driver(thread_num)
-    if not driver:
-        time.sleep(RETRY_DELAY)
-        return send_view(link, thread_num, attempt + 1)
 
     try:
         driver.set_page_load_timeout(PROXY_TIMEOUT)
         driver.get(link)
-        time.sleep(random.randint(5, 10))
+        time.sleep(random.randint(8, 15))
         
         human_like_actions(driver)
         
         # Try to play video
         try:
-            driver.execute_script("""
-                var v = document.querySelector('video');
-                if (v) {
-                    v.play();
-                    v.currentTime = 10;  // Skip ahead
-                    v.playbackRate = 1.2;  // Slightly faster
-                }
-            """)
+            driver.execute_script("document.querySelector('video').play()")
             play_time = random.randint(15, 30)
             time.sleep(play_time)
         except:
-            pass
+            try:
+                play_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Play']")
+                play_button.click()
+                time.sleep(random.randint(15, 30))
+            except:
+                pass
         
         view_counter.increment(success=True)
         print(f"✅ [Thread-{thread_num}] View sent! | {view_counter.get_stats()}")
         return True
     except Exception as e:
-        print(f"❌ [Thread-{thread_num}] Attempt {attempt} Error: {str(e)[:100]}...")
-        time.sleep(RETRY_DELAY)
-        return send_view(link, thread_num, attempt + 1)
+        view_counter.increment(success=False)
+        print(f"❌ [Thread-{thread_num}] Error: {str(e)[:100]}... | {view_counter.get_stats()}")
+        return False
     finally:
         try:
             driver.quit()
@@ -176,13 +163,13 @@ def send_view(link, thread_num, attempt=1):
 
 def main():
     print("""
-    IMPROVED TERABOX VIEW BOT
-    ========================
+    TERABOX VIEW BOT (Fixed Version)
+    ==============================
     Features:
+    - Fixed ChromeDriver errors
     - Better proxy handling
-    - Retry mechanism
-    - Isolated browser profiles
-    - More human-like behavior
+    - Stable threading
+    - Detailed view counter
     """)
     
     link = input("Terabox Video Link: ").strip()
@@ -196,14 +183,14 @@ def main():
     def worker(thread_num):
         for _ in range(views_per_thread):
             send_view(link, thread_num)
-            time.sleep(random.randint(15, 45))  # Longer delay between views
+            time.sleep(random.randint(10, 30))
     
     thread_list = []
     for i in range(threads):
         t = threading.Thread(target=worker, args=(i+1,))
         t.start()
         thread_list.append(t)
-        time.sleep(5)  # Stagger thread starts
+        time.sleep(1)  # Increased delay between thread starts
     
     for t in thread_list:
         t.join()
@@ -212,9 +199,9 @@ def main():
 
 if __name__ == "__main__":
     # Install required ChromeDriver first
-    try:
-        uc.install()
-    except Exception as e:
-        print(f"Note: {str(e)}")
+    os.system('wget https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip')
+    os.system('unzip chromedriver_linux64.zip')
+    os.system('chmod +x chromedriver')
+    os.system('sudo mv chromedriver /usr/local/bin/')
     
     main()
