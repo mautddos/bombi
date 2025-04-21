@@ -26,16 +26,18 @@ def get_video_link():
 
 def setup_driver(proxy=None):
     options = webdriver.ChromeOptions()
-    
-    # Updated Headless Mode and Settings
-    options.add_argument('--headless=new')  # IMPORTANT fix
+
+    # Headless + Safe debugging
+    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--remote-debugging-port=9222')  # Important fix
     options.add_argument('--disable-gpu')
     options.add_argument("--remote-allow-origins=*")
     options.add_argument(f'user-agent={random.choice(USER_AGENTS)}')
-    
+
+    # Proxy use अगर दिया गया
     if proxy:
         options.add_argument(f'--proxy-server=http://{proxy}')
 
@@ -61,8 +63,8 @@ def simulate_view(video_url, proxy=None):
 
         # Random mouse movements
         for _ in range(random.randint(3, 7)):
-            x_offset = random.randint(10, 200)
-            y_offset = random.randint(10, 200)
+            x_offset = random.randint(10, 300)
+            y_offset = random.randint(10, 300)
             actions.move_by_offset(x_offset, y_offset).perform()
             time.sleep(random.uniform(0.5, 1.5))
 
@@ -70,8 +72,8 @@ def simulate_view(video_url, proxy=None):
         driver.execute_script(f"window.scrollBy(0, {random.randint(100, 500)})")
         time.sleep(random.uniform(1, 3))
 
-        # Watch time (randomized)
-        watch_time = random.randint(45, 180)
+        # Watch time (random)
+        watch_time = random.randint(45, 180)  # 45-180 सेकंड
         print(f"वीडियो देखा जा रहा है... {watch_time} सेकंड")
 
         for _ in range(random.randint(2, 5)):
@@ -105,7 +107,8 @@ if __name__ == "__main__":
         else:
             print("❌ व्यू भेजने में असफल!")
 
-        delay = random.randint(15, 60)
+        # Random delay to avoid detection
+        delay = random.randint(15, 60)  # 15-60 सेकंड वेट
         print(f"⏳ अगले व्यू से पहले {delay} सेकंड का इंतजार...")
         time.sleep(delay)
 
