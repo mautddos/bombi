@@ -1,115 +1,70 @@
 import time
 import random
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 
-# प्रॉक्सी लिस्ट (चाहो तो खाली छोड़ो अगर private proxies हो)
-PROXY_LIST = [
-    "123.45.67.89:8080",
-    "98.76.54.32:3128",
-    # और प्रॉक्सी डालो यहाँ
-]
-
-# यूजर एजेंट्स लिस्ट (अधिक realistic)
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+    # कुछ random user agents
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
 ]
-
-def get_video_link():
-    return input("TeraBox वीडियो लिंक डालें: ").strip()
 
 def setup_driver(proxy=None):
-    options = webdriver.ChromeOptions()
-
-    # Headless + Safe debugging
+    options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument('--remote-debugging-port=9222')  # Important fix
+    options.add_argument('--remote-debugging-port=9222')
     options.add_argument('--disable-gpu')
     options.add_argument("--remote-allow-origins=*")
-    options.add_argument(f'user-agent={random.choice(USER_AGENTS)}')
+    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
 
-    # Proxy use अगर दिया गया
     if proxy:
         options.add_argument(f'--proxy-server=http://{proxy}')
 
     try:
-        service = Service(ChromeDriverManager().install())
+        # Snap chromium के साथ manually path देना पड़ता है
+        service = Service('/usr/lib/chromium-browser/chromedriver')
         driver = webdriver.Chrome(service=service, options=options)
         return driver
     except WebDriverException as e:
         print(f"ChromeDriver Error: {e}")
         return None
 
-def simulate_view(video_url, proxy=None):
-    driver = setup_driver(proxy)
-    if not driver:
+def send_view(link):
+    driver = setup_driver()
+    if driver is None:
         return False
 
     try:
-        time.sleep(random.uniform(1, 3))
-        driver.get(video_url)
-        print(f"वीडियो ओपन किया गया: {video_url}")
-
-        actions = ActionChains(driver)
-
-        # Random mouse movements
-        for _ in range(random.randint(3, 7)):
-            x_offset = random.randint(10, 300)
-            y_offset = random.randint(10, 300)
-            actions.move_by_offset(x_offset, y_offset).perform()
-            time.sleep(random.uniform(0.5, 1.5))
-
-        # Random scroll
-        driver.execute_script(f"window.scrollBy(0, {random.randint(100, 500)})")
-        time.sleep(random.uniform(1, 3))
-
-        # Watch time (random)
-        watch_time = random.randint(45, 180)  # 45-180 सेकंड
-        print(f"वीडियो देखा जा रहा है... {watch_time} सेकंड")
-
-        for _ in range(random.randint(2, 5)):
-            time.sleep(watch_time // random.randint(3, 6))
-            driver.execute_script("window.scrollBy(0, 100)")
-            actions.move_by_offset(random.randint(-50, 50), random.randint(-50, 50)).perform()
-
-        driver.quit()
+        driver.get(link)
+        time.sleep(random.randint(5, 10))
+        print("✅ View भेजा गया!")
         return True
-
     except Exception as e:
-        print("ERROR:", e)
-        if driver:
-            driver.quit()
+        print(f"❌ Error: {e}")
         return False
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
-    video_url = get_video_link()
-    view_count = int(input("कितने व्यूज भेजने हैं?: "))
+    os.system('clear')
+    print("TeraBox वीडियो लिंक डालें: ", end="")
+    link = input().strip()
+    print("कितने व्यूज भेजने हैं?: ", end="")
+    views = int(input().strip())
 
-    successful_views = 0
-    for i in range(view_count):
-        print(f"\nव्यू {i+1} सिमुलेट किया जा रहा है...")
-
-        proxy = random.choice(PROXY_LIST) if PROXY_LIST else None
-        success = simulate_view(video_url, proxy)
-
-        if success:
-            successful_views += 1
-            print("✅ सफलतापूर्वक व्यू भेजा गया!")
-        else:
-            print("❌ व्यू भेजने में असफल!")
-
-        # Random delay to avoid detection
-        delay = random.randint(15, 60)  # 15-60 सेकंड वेट
-        print(f"⏳ अगले व्यू से पहले {delay} सेकंड का इंतजार...")
-        time.sleep(delay)
-
-    print(f"\nकुल {successful_views}/{view_count} व्यू सफलतापूर्वक भेजे गए!")
+    for i in range(1, views + 1):
+        print(f"व्यू {i} सिमुलेट किया जा रहा है...")
+        success = send_view(link)
+        if not success:
+            print("❌  व्यू भेजने में असफल!")
+        wait_time = random.randint(20, 40)
+        print(f"⏳  अगले व्यू से पहले {wait_time} सेकंड का इंतजार...")
+        time.sleep(wait_time)
