@@ -27,19 +27,19 @@ def get_video_link():
 def setup_driver(proxy=None):
     options = webdriver.ChromeOptions()
     
-    # Headless + Anti-detection settings
-    options.add_argument('--headless')
+    # Updated Headless Mode and Settings
+    options.add_argument('--headless=new')  # IMPORTANT fix
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--disable-gpu')
+    options.add_argument("--remote-allow-origins=*")
     options.add_argument(f'user-agent={random.choice(USER_AGENTS)}')
     
-    # Proxy settings
     if proxy:
         options.add_argument(f'--proxy-server=http://{proxy}')
 
     try:
-        # Auto-download ChromeDriver
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         return driver
@@ -53,14 +53,12 @@ def simulate_view(video_url, proxy=None):
         return False
 
     try:
-        # Open video with randomized delay
         time.sleep(random.uniform(1, 3))
         driver.get(video_url)
         print(f"वीडियो ओपन किया गया: {video_url}")
 
-        # Simulate human-like interactions
         actions = ActionChains(driver)
-        
+
         # Random mouse movements
         for _ in range(random.randint(3, 7)):
             x_offset = random.randint(10, 200)
@@ -73,10 +71,9 @@ def simulate_view(video_url, proxy=None):
         time.sleep(random.uniform(1, 3))
 
         # Watch time (randomized)
-        watch_time = random.randint(45, 180)  # 45-180 seconds
+        watch_time = random.randint(45, 180)
         print(f"वीडियो देखा जा रहा है... {watch_time} सेकंड")
-        
-        # Simulate activity during watch time
+
         for _ in range(random.randint(2, 5)):
             time.sleep(watch_time // random.randint(3, 6))
             driver.execute_script("window.scrollBy(0, 100)")
@@ -108,8 +105,7 @@ if __name__ == "__main__":
         else:
             print("❌ व्यू भेजने में असफल!")
 
-        # Randomized delay between views (longer to avoid detection)
-        delay = random.randint(15, 60)  # 15-60 seconds
+        delay = random.randint(15, 60)
         print(f"⏳ अगले व्यू से पहले {delay} सेकंड का इंतजार...")
         time.sleep(delay)
 
