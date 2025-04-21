@@ -5,136 +5,174 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 import undetected_chromedriver as uc
 
-# प्रॉक्सी लिस्ट (अपनी प्रॉक्सी डालें)
+# Configuration
+MAX_THREADS = 100  # Maximum concurrent threads
+VIEWS_PER_THREAD = 1  # Views per thread
+PROXY_TIMEOUT = 30  # Proxy timeout in seconds
+
+# Premium Proxy List (Replace with your proxies)
 PROXY_LIST = [
-    "193.123.225.255:8080",
-    "45.67.89.123:3128",
-    "111.222.333.444:8080"
+    "user:pass@ip:port",  # Premium proxy format 1
+    "ip:port",            # Premium proxy format 2
+    # Add more proxies here (minimum 100 recommended for 100 threads)
 ]
 
-# यूजर एजेंट लिस्ट
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    # Updated user agents list
 ]
+
+class ViewCounter:
+    def __init__(self):
+        self.count = 0
+        self.lock = threading.Lock()
+    
+    def increment(self):
+        with self.lock:
+            self.count += 1
+    
+    def get_count(self):
+        with self.lock:
+            return self.count
+
+view_counter = ViewCounter()
 
 def setup_driver():
     options = uc.ChromeOptions()
     
-    # प्रॉक्सी सेटअप
+    # Proxy setup with authentication support
     if PROXY_LIST:
         proxy = random.choice(PROXY_LIST)
-        options.add_argument(f'--proxy-server=http://{proxy}')
+        if "@" in proxy:  # Proxy with authentication
+            username, rest = proxy.split("@")[0], proxy.split("@")1]
+            password, proxy_ip = rest.split(":") if ":" in rest else ("", rest)
+            options.add_argument(f'--proxy-server=http://{proxy_ip}')
+            options.add_argument(f'--proxy-auth={username}:{password}')
+        else:
+            options.add_argument(f'--proxy-server=http://{proxy}')
     
-    # हेडलेस मोड (चुपके से चलने के लिए)
+    # Enhanced stealth options
     options.add_argument('--headless=new')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--remote-debugging-port=9222')
     
-    # रैंडम यूजर एजेंट
+    # Random user agent
     user_agent = random.choice(USER_AGENTS)
     options.add_argument(f'user-agent={user_agent}')
     
-    # बॉट डिटेक्शन से बचाव
-    driver = uc.Chrome(
-        options=options,
-        use_subprocess=True,
-    )
-    return driver
+    try:
+        driver = uc.Chrome(
+            options=options,
+            use_subprocess=True,
+            version_main=114  # Specify Chrome version
+        )
+        return driver
+    except Exception as e:
+        print(f"🚨 Driver Error: {str(e)[:100]}")
+        return None
 
 def human_like_actions(driver):
     try:
-        # रैंडम स्क्रॉलिंग
+        # Random scrolling
         for _ in range(random.randint(3, 7)):
             scroll_px = random.randint(300, 800)
             driver.execute_script(f"window.scrollBy(0, {scroll_px})")
-            time.sleep(random.uniform(0.5, 2))
+            time.sleep(random.uniform(0.3, 1.5))
         
-        # रैंडम क्लिक (अगर कोई बटन मिले)
+        # Random clicks
         buttons = driver.find_elements(By.TAG_NAME, "button")
         if buttons:
             random.choice(buttons).click()
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(0.5, 2))
         
-        # कीबोर्ड की रैंडम की प्रेस
+        # Keyboard actions
         actions = ActionChains(driver)
         actions.send_keys(Keys.SPACE).pause(1).send_keys(Keys.ARROW_DOWN).perform()
+        
+        # Mouse movements
+        actions.move_by_offset(random.randint(5, 50), random.randint(5, 50)).perform()
     except:
         pass
 
-def send_view(link):
+def send_view(link, thread_num):
+    global view_counter
     driver = setup_driver()
+    if not driver:
+        return False
+
     try:
-        driver.get(link)
-        time.sleep(random.randint(5, 10))  # पेज लोड होने का इंतज़ार
+        # Set timeout
+        driver.set_page_load_timeout(PROXY_TIMEOUT)
         
-        # ह्यूमन जैसी एक्टिविटीज
+        # Open URL
+        driver.get(link)
+        time.sleep(random.randint(8, 15))
+        
+        # Human-like behavior
         human_like_actions(driver)
         
-        # वीडियो चलाने की कोशिश
+        # Play video (multiple methods)
         try:
-            play_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Play']")
-            play_button.click()
-            time.sleep(random.randint(10, 20))  # वीडियो चलने दें
+            driver.execute_script("document.querySelector('video').play()")
+            time.sleep(random.randint(15, 30))
         except:
-            pass
+            try:
+                play_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Play']")
+                play_button.click()
+                time.sleep(random.randint(15, 30))
+            except:
+                pass
         
-        print(f"✅ व्यू भेजा गया! (Session: {driver.session_id})")
+        view_counter.increment()
+        print(f"✅ [Thread-{thread_num}] View sent! (Total: {view_counter.get_count()})")
         return True
     except Exception as e:
-        print(f"❌ ERROR: {str(e)[:100]}...")
+        print(f"❌ [Thread-{thread_num}] Error: {str(e)[:100]}...")
         return False
     finally:
-        driver.quit()
-
-def worker(link, views_per_thread):
-    for i in range(views_per_thread):
-        print(f"📡 {threading.current_thread().name} - व्यू {i+1} भेजा जा रहा है...")
-        success = send_view(link)
-        if not success:
-            print("⚠️ रिपीट करने का प्रयास...")
-            time.sleep(5)
-            send_view(link)
-        wait_time = random.randint(15, 30)
-        print(f"⏳ अगले व्यू से पहले {wait_time} सेकंड इंतज़ार...")
-        time.sleep(wait_time)
+        try:
+            driver.quit()
+        except:
+            pass
 
 def main():
     print("""
-    ████████╗███████╗██████╗  █████╗ ██████╗  ██████╗ ██╗  ██╗
-    ╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚██╗██╔╝
-       ██║   █████╗  ██████╔╝███████║██████╔╝██║   ██║ ╚███╔╝ 
-       ██║   ██╔══╝  ██╔══██╗██╔══██║██╔══██╗██║   ██║ ██╔██╗ 
-       ██║   ███████╗██║  ██║██║  ██║██████╔╝╚██████╔╝██╔╝ ██╗
-       ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝
-    ========================================================
-    KHATARNAK Terabox View Bot | 100% Undetectable
+    TERABOX MASS VIEW BOT
+    ====================
+    Features:
+    - Mass proxy support
+    - View counter
+    - Human-like behavior
+    - Multi-threading
     """)
     
     link = input("Terabox Video Link: ").strip()
-    total_views = int(input("कितने व्यूज भेजने हैं?: "))
-    threads = int(input("कितने थ्रेड्स चलाने हैं? (ज्यादा = तेज): "))
+    total_views = int(input("Total views to send: "))
+    threads = min(int(input("Threads to use (1-100): ")), MAX_THREADS)
     
-    views_per_thread = total_views // threads
-    print(f"\n🚀 प्रत्येक थ्रेड {views_per_thread} व्यूज भेजेगा...\n")
+    views_per_thread = max(1, total_views // threads)
+    print(f"\n🔥 Starting {threads} threads ({views_per_thread} views each)...\n")
     
-    # मल्टी-थ्रेडिंग शुरू करें
-    all_threads = []
+    def worker(thread_num):
+        for _ in range(views_per_thread):
+            send_view(link, thread_num)
+            time.sleep(random.randint(10, 30))
+    
+    # Start threads
+    thread_list = []
     for i in range(threads):
-        t = threading.Thread(
-            target=worker,
-            args=(link, views_per_thread),
-            name=f"Thread-{i+1}"
-        )
+        t = threading.Thread(target=worker, args=(i+1,))
         t.start()
-        all_threads.append(t)
+        thread_list.append(t)
+        time.sleep(0.5)  # Stagger thread starts
     
-    for t in all_threads:
+    # Wait for completion
+    for t in thread_list:
         t.join()
     
-    print("\n🎉 सभी व्यूज सफलतापूर्वक भेज दिए गए!")
+    print(f"\n🎉 Campaign Complete! Total views sent: {view_counter.get_count()}")
 
 if __name__ == "__main__":
     main()
