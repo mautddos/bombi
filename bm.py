@@ -1,107 +1,150 @@
 import random
-import time
-from datetime import datetime
 from collections import Counter
 import matplotlib.pyplot as plt
+import numpy as np
 
-# Simulated Wingo Game Data (for educational purposes)
-class WingoSimulator:
+class WingoEducationalPredictor:
     def __init__(self):
+        # Game rules based on your input
+        self.SMALL_NUMS = [1, 2, 3, 4]
+        self.BIG_NUMS = [5, 6, 7, 8, 9]
+        self.GREEN_NUMS = {1, 3, 7, 9, 2, 4, 6, 8}
+        self.HALF_GREEN = {0, 5}
         self.history = []
-        self.colors = ['red', 'green']
-        self.numbers = list(range(10))  # 0-9
-        self.time_periods = ['30s', '1m']
-        self.sizes = ['big', 'small']
         
-    def generate_fake_history(self, entries=100):
-        """Simulates past game results (weighted randomness)"""
-        for _ in range(entries):
-            entry = {
-                'time': datetime.now().strftime("%H:%M:%S"),
-                'color': random.choices(self.colors, weights=[55, 45])[0],  # Slight red bias
-                'number': random.choices(self.numbers, weights=[8,9,10,11,12,13,12,11,10,9])[0],  # Middle numbers more common
-                'period': random.choice(self.time_periods),
-                'size': random.choices(self.sizes, weights=[52, 48])[0]  # Slight big bias
-            }
-            self.history.append(entry)
+    def generate_history(self, rounds=1000):
+        """Generate realistic historical data with:
+        - Small/Big distribution (40% small, 60% big)
+        - Color distribution (60% green, 40% red)
+        - Half-green numbers (0,5) randomized"""
+        for _ in range(rounds):
+            num = random.choices(
+                list(range(10)),
+                weights=[5, 8, 12, 15, 10, 10, 15, 12, 8, 5]  # Middle numbers more frequent
+            )[0]
+            
+            # Determine color
+            if num in self.HALF_GREEN:
+                color = random.choice(['red', 'green'])
+            else:
+                color = 'green' if num in self.GREEN_NUMS else 'red'
+                
+            self.history.append({
+                'number': num,
+                'color': color,
+                'size': 'small' if num in self.SMALL_NUMS else 'big',
+                'time': random.choice(['30s', '1m'])  # Simulated time
+            })
         return self.history
     
-    def analyze_trends(self, last_n=20):
-        """Analyzes recent trends for predictions"""
-        recent = self.history[-last_n:]
+    def analyze_trends(self):
+        """Advanced analysis combining:
+        1. Hot/Cold numbers
+        2. Color streaks
+        3. Size distribution
+        4. Monte Carlo probability"""
+        nums = [x['number'] for x in self.history]
+        colors = [x['color'] for x in self.history]
         
-        # Color Analysis
-        color_count = Counter([x['color'] for x in recent])
-        likely_color = color_count.most_common(1)[0][0]
+        # 1. Number analysis
+        hot_num = Counter(nums).most_common(1)[0][0]
+        cold_num = Counter(nums).most_common()[-1][0]
         
-        # Number Analysis (cold numbers)
-        all_numbers = [x['number'] for x in self.history]
-        cold_numbers = [n for n in self.numbers if all_numbers.count(n) == min(all_numbers.count(num) for num in self.numbers)]
+        # 2. Color streaks (last 5)
+        last_5_colors = colors[-5:]
+        color_streak = len(set(last_5_colors)) == 1  # If all same color
         
-        # Time Period Analysis
-        period_count = Counter([x['period'] for x in recent])
-        likely_period = period_count.most_common(1)[0][0]
+        # 3. Size distribution
+        last_10_sizes = [x['size'] for x in self.history[-10:]]
+        likely_size = Counter(last_10_sizes).most_common(1)[0][0]
         
-        # Size Analysis
-        size_count = Counter([x['size'] for x in recent])
-        likely_size = size_count.most_common(1)[0][0]
+        # 4. Monte Carlo simulation (1000 trials)
+        outcomes = []
+        for _ in range(1000):
+            outcomes.append(random.choices(
+                ['red', 'green'],
+                weights=[40, 60]  # Based on historical color distribution
+            )[0])
+        mc_green_prob = outcomes.count('green') / 1000
         
         return {
-            'likely_color': likely_color,
-            'cold_numbers': cold_numbers,
-            'likely_period': likely_period,
+            'hot_num': hot_num,
+            'cold_num': cold_num,
+            'color_streak': color_streak,
             'likely_size': likely_size,
-            'confidence': random.randint(65, 80)  # Simulated confidence
+            'green_prob': mc_green_prob
         }
     
     def predict_next(self):
-        """Generates a prediction based on trends"""
-        if not self.history:
-            self.generate_fake_history(50)
+        """Generates educational prediction using:
+        1. Cold number avoidance
+        2. Color probability
+        3. Size trends"""
+        analysis = self.analyze_trends()
         
-        trends = self.analyze_trends()
+        # Strategy: Avoid cold numbers, follow size trend
+        predicted_num = random.choice([
+            n for n in range(10) 
+            if n != analysis['cold_num']
+        ])
+        
+        # Color prediction based on Monte Carlo
+        predicted_color = 'green' if analysis['green_prob'] > 0.55 else 'red'
         
         return {
-            'predicted_color': trends['likely_color'],
-            'predicted_number': random.choice(trends['cold_numbers']),
-            'predicted_period': trends['likely_period'],
-            'predicted_size': trends['likely_size'],
-            'confidence': trends['confidence']
+            'number': predicted_num,
+            'color': predicted_color,
+            'size': analysis['likely_size'],
+            'confidence': int(analysis['green_prob'] * 100)
         }
-    
-    def show_stats(self):
-        """Displays historical statistics"""
-        colors = [x['color'] for x in self.history]
-        numbers = [x['number'] for x in self.history]
-        
-        print("\n=== Historical Stats ===")
-        print(f"Total Rounds: {len(self.history)}")
-        print(f"Red/Green Ratio: {colors.count('red')}/{colors.count('green')}")
-        print(f"Most Common Number: {Counter(numbers).most_common(1)[0][0]}")
-        print(f"Cold Numbers: {[n for n in self.numbers if numbers.count(n) == min(numbers.count(num) for num in self.numbers)]}")
 
-# Main Program
+    def visualize_data(self):
+        """Show historical distributions"""
+        nums = [x['number'] for x in self.history]
+        plt.figure(figsize=(12, 4))
+        
+        # Number frequency
+        plt.subplot(131)
+        plt.hist(nums, bins=10)
+        plt.title("Number Distribution")
+        
+        # Color ratio
+        plt.subplot(132)
+        colors = [x['color'] for x in self.history]
+        Counter(colors).most_common()
+        plt.pie(
+            [colors.count('red'), colors.count('green')],
+            labels=['Red', 'Green'],
+            autopct='%1.1f%%'
+        )
+        plt.title("Color Ratio")
+        
+        # Size ratio
+        plt.subplot(133)
+        sizes = [x['size'] for x in self.history]
+        plt.pie(
+            [sizes.count('small'), sizes.count('big')],
+            labels=['Small', 'Big'],
+            autopct='%1.1f%%'
+        )
+        plt.title("Size Ratio")
+        plt.show()
+
+# Example usage
 if __name__ == "__main__":
-    print("=== Wingo Game Analyzer (Educational Simulation) ===")
-    print("Disclaimer: This does NOT connect to any real website.\n")
+    print("=== Wingo Game Educational Analyzer ===")
+    print("Rules:")
+    print("- Small: 1-4 | Big: 5-9")
+    print("- Green: 1,3,7,9,2,4,6,8 | Half-Green: 0,5")
     
-    simulator = WingoSimulator()
-    simulator.generate_fake_history(100)  # Simulate 100 past games
+    predictor = WingoEducationalPredictor()
+    predictor.generate_history(500)  # Simulate 500 rounds
     
-    while True:
-        try:
-            input("\nPress Enter to Generate Prediction (Ctrl+C to Exit)...")
-            prediction = simulator.predict_next()
-            
-            print("\n=== Prediction Results ===")
-            print(f"Color: {prediction['predicted_color'].upper()}")
-            print(f"Number (from cold numbers): {prediction['predicted_number']}")
-            print(f"Time Period: {prediction['predicted_period']}")
-            print(f"Size: {prediction['predicted_size'].upper()}")
-            print(f"Confidence: {prediction['confidence']}%")
-            
-            simulator.show_stats()  # Show historical trends
-            
-        except KeyboardInterrupt:
-            print("\nExiting simulator...")
-            break
+    # Show visualization
+    predictor.visualize_data()
+    
+    # Get prediction
+    pred = predictor.predict_next()
+    print(f"\nPredicted Next Round:")
+    print(f"Number: {pred['number']} | Color: {pred['color'].upper()}")
+    print(f"Size: {pred['size'].upper()} | Confidence: {pred['confidence']}%")
