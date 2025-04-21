@@ -1,233 +1,115 @@
-import time
 import random
-import threading
+import time
+from datetime import datetime
 import requests
-import os
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
-import undetected_chromedriver as uc
+from bs4 import BeautifulSoup
+import numpy as np
+from collections import Counter
 
-# ========== GLOBAL CONFIGURATION ==========
-MAX_THREADS = 5
-MAX_RETRIES = 3
-PROXY_TIMEOUT = 20
-VIEW_DELAY = (15, 30)  # Min/Max delay between views (seconds)
-CHROME_VERSION = 114
-
-# ========== GLOBAL VARIABLES ==========
-PROXY_SOURCES = [
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
-]
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-]
-
-# Initialize global proxy list
-PROXY_LIST = []
-
-# ========== PROXY MANAGEMENT ==========
-def refresh_proxies():
-    global PROXY_LIST
-    proxies = []
-    for url in PROXY_SOURCES:
-        try:
-            response = requests.get(url, timeout=10)
-            proxies.extend([p.strip() for p in response.text.splitlines() if p.strip()])
-        except Exception as e:
-            print(f"⚠️ Proxy source error: {str(e)[:80]}")
-            continue
-    
-    PROXY_LIST = list(set(proxies))[:200]  # Remove duplicates and limit to 200
-    print(f"🌀 Loaded {len(PROXY_LIST)} fresh proxies")
-    return PROXY_LIST
-
-# Initial proxy load
-refresh_proxies()
-
-# ========== VIEW MANAGEMENT ==========
-class ViewManager:
+class WingoAnalyzer:
     def __init__(self):
-        self.lock = threading.Lock()
-        self.success = 0
-        self.failed = 0
-        self.proxy_index = 0
-    
-    def get_proxy(self):
-        with self.lock:
-            if self.proxy_index >= len(PROXY_LIST):
-                self.proxy_index = 0
-                refresh_proxies()
-            proxy = PROXY_LIST[self.proxy_index]
-            self.proxy_index += 1
-            return proxy
-    
-    def record_result(self, success):
-        with self.lock:
-            if success:
-                self.success += 1
-            else:
-                self.failed += 1
-    
-    def get_stats(self):
-        with self.lock:
-            return f"✅ Success: {self.success} | ❌ Failed: {self.failed}"
-
-view_manager = ViewManager()
-
-# ========== BROWSER FUNCTIONS ==========
-def setup_driver():
-    options = uc.ChromeOptions()
-    
-    # Proxy setup
-    proxy = view_manager.get_proxy()
-    options.add_argument(f'--proxy-server=http://{proxy}')
-    
-    # Stealth settings
-    options.add_argument('--headless=new')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument(f'user-agent={random.choice(USER_AGENTS)}')
-    
-    try:
-        driver = uc.Chrome(
-            options=options,
-            use_subprocess=True,
-            version_main=CHROME_VERSION,
-            driver_executable_path='/usr/local/bin/chromedriver'
-        )
-        return driver
-    except Exception as e:
-        print(f"⚠️ Proxy {proxy} failed: {str(e)[:80]}")
-        return None
-
-def human_interaction(driver):
-    try:
-        # Random scrolling
-        for _ in range(random.randint(2, 5)):
-            scroll_amount = random.randint(200, 800)
-            driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
-            time.sleep(random.uniform(0.5, 1.5))
+        self.url = "https://www.tirangagame.xyz"
+        self.history = []
+        self.patterns = {
+            'color_sequence': [],
+            'number_frequency': [0]*10,
+            'time_period_sequence': [],
+            'size_sequence': []
+        }
         
-        # Random clicks
-        buttons = driver.find_elements(By.TAG_NAME, "button")[:3]
-        for btn in buttons:
-            try:
-                btn.click()
-                time.sleep(random.uniform(0.3, 1.2))
-            except:
-                pass
+    def simulate_history(self, num_entries=100):
+        """Generate simulated historical data"""
+        colors = ['red', 'green']
+        time_periods = ['30s', '1m']
+        sizes = ['big', 'small']
         
-        # Keyboard actions
-        ActionChains(driver).send_keys(Keys.SPACE).pause(1).perform()
-    except Exception as e:
-        print(f"⚠️ Interaction error: {str(e)[:80]}")
-
-# ========== CORE VIEW FUNCTION ==========
-def send_view(link, attempt=1):
-    driver = setup_driver()
-    if not driver:
-        if attempt < MAX_RETRIES:
-            time.sleep(2)
-            return send_view(link, attempt + 1)
-        view_manager.record_result(False)
-        return False
-
-    try:
-        # Set timeout and load page
-        driver.set_page_load_timeout(PROXY_TIMEOUT)
-        driver.get(link)
-        time.sleep(random.randint(5, 10))
+        for _ in range(num_entries):
+            entry = {
+                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'color': random.choices(colors, weights=[55, 45], k=1)[0],
+                'number': random.randint(0, 9),
+                'time_period': random.choice(time_periods),
+                'size': random.choices(sizes, weights=[52, 48], k=1)[0]
+            }
+            self.history.append(entry)
+            self._update_patterns(entry)
+    
+    def _update_patterns(self, entry):
+        """Update pattern tracking"""
+        self.patterns['color_sequence'].append(entry['color'])
+        self.patterns['number_frequency'][entry['number']] += 1
+        self.patterns['time_period_sequence'].append(entry['time_period'])
+        self.patterns['size_sequence'].append(entry['size'])
+    
+    def analyze_patterns(self):
+        """Analyze historical patterns"""
+        analysis = {}
         
-        # Human-like behavior
-        human_interaction(driver)
+        # Color analysis
+        color_counts = Counter(self.patterns['color_sequence'][-10:])
+        analysis['color_trend'] = color_counts.most_common(1)[0][0]
         
-        # Try to play video (multiple methods)
-        try:
-            driver.execute_script("document.querySelector('video').play()")
-            time.sleep(random.randint(10, 20))
-        except:
-            try:
-                driver.find_element(By.CSS_SELECTOR, "[aria-label='Play']").click()
-                time.sleep(random.randint(10, 20))
-            except:
-                pass
+        # Number analysis (find cold numbers)
+        number_freq = self.patterns['number_frequency']
+        cold_numbers = [i for i, x in enumerate(number_freq) if x == min(number_freq)]
         
-        view_manager.record_result(True)
-        print(f"🎯 View sent! ({view_manager.get_stats()})")
-        return True
-    except Exception as e:
-        print(f"⚠️ Attempt {attempt} failed: {str(e)[:80]}")
-        if attempt < MAX_RETRIES:
-            time.sleep(2)
-            return send_view(link, attempt + 1)
-        view_manager.record_result(False)
-        return False
-    finally:
-        try:
-            driver.quit()
-        except:
-            pass
+        # Time period analysis
+        last_periods = self.patterns['time_period_sequence'][-5:]
+        analysis['period_trend'] = '1m' if last_periods.count('1m') > 3 else '30s'
+        
+        # Size analysis
+        size_counts = Counter(self.patterns['size_sequence'][-10:])
+        analysis['size_trend'] = size_counts.most_common(1)[0][0]
+        
+        return {
+            'recommended_color': analysis['color_trend'],
+            'cold_numbers': cold_numbers,
+            'recommended_period': analysis['period_trend'],
+            'recommended_size': analysis['size_trend']
+        }
+    
+    def generate_prediction(self):
+        """Generate educated prediction"""
+        if len(self.history) < 20:
+            self.simulate_history(20)
+            
+        analysis = self.analyze_patterns()
+        
+        return {
+            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'color': analysis['recommended_color'],
+            'number': random.choice(analysis['cold_numbers']),
+            'time_period': analysis['recommended_period'],
+            'size': analysis['recommended_size'],
+            'confidence': random.randint(60, 85)  # Simulated confidence percentage
+        }
 
-# ========== THREAD WORKER ==========
-def worker(link, views_needed):
-    views_sent = 0
-    while views_sent < views_needed:
-        if send_view(link):
-            views_sent += 1
-        time.sleep(random.randint(*VIEW_DELAY))
-
-# ========== MAIN FUNCTION ==========
 def main():
-    print("""
-    ████████╗███████╗██████╗  █████╗ ██████╗  ██████╗ ██╗  ██╗
-    ╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚██╗██╔╝
-       ██║   █████╗  ██████╔╝███████║██████╔╝██║   ██║ ╚███╔╝ 
-       ██║   ██╔══╝  ██╔══██╗██╔══██║██╔══██╗██║   ██║ ██╔██╗ 
-       ██║   ███████╗██║  ██║██║  ██║██████╔╝╚██████╔╝██╔╝ ██╗
-       ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝
-    ========================================================
-    TeraBox Ultimate View Bot v2.0
-    """)
+    print("Wingo Pattern Analyzer (Simulation Only)")
+    print("----------------------------------------")
+    print("Note: This is a theoretical simulation only")
+    print("No actual connection to any gambling site\n")
     
-    link = input("Enter TeraBox video URL: ").strip()
-    total_views = int(input("Total views needed: "))
-    threads = min(int(input(f"Threads (1-{MAX_THREADS}): ")), MAX_THREADS)
+    analyzer = WingoAnalyzer()
+    analyzer.simulate_history(100)
     
-    views_per_thread = max(1, total_views // threads)
-    print(f"\n🚀 Starting {threads} threads (each sending ~{views_per_thread} views)")
-    print(f"🔁 Auto-retry up to {MAX_RETRIES} times per view\n")
-    
-    workers = []
-    for i in range(threads):
-        t = threading.Thread(
-            target=worker,
-            args=(link, views_per_thread),
-            name=f"Worker-{i+1}"
-        )
-        t.start()
-        workers.append(t)
-        time.sleep(0.5)  # Stagger thread starts
-    
-    for t in workers:
-        t.join()
-    
-    print(f"\n🎉 Campaign complete! Final results: {view_manager.get_stats()}")
+    while True:
+        try:
+            input("\nPress Enter to generate analysis (Ctrl+C to quit)...")
+            prediction = analyzer.generate_prediction()
+            
+            print("\nAnalysis Results:")
+            print(f"Recommended Color: {prediction['color'].upper()}")
+            print(f"Recommended Number (from cold numbers): {prediction['number']}")
+            print(f"Recommended Time Period: {prediction['time_period']}")
+            print(f"Recommended Size: {prediction['size'].upper()}")
+            print(f"Simulated Confidence: {prediction['confidence']}%")
+            print("----------------------------------------")
+            print("Remember: Gambling involves risk. No prediction is guaranteed.")
+            
+        except KeyboardInterrupt:
+            print("\nClosing analyzer...")
+            break
 
-# ========== INITIALIZATION ==========
 if __name__ == "__main__":
-    # Ensure ChromeDriver is installed
-    if not os.path.exists("/usr/local/bin/chromedriver"):
-        print("⚙️ Installing ChromeDriver...")
-        os.system('wget https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip')
-        os.system('unzip chromedriver_linux64.zip')
-        os.system('chmod +x chromedriver')
-        os.system('sudo mv chromedriver /usr/local/bin/')
-        os.system('rm chromedriver_linux64.zip')
-    
     main()
