@@ -1,64 +1,72 @@
 import time
 import random
 import threading
+import requests
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
 import undetected_chromedriver as uc
 
 # Configuration
-MAX_THREADS = 100  # Maximum concurrent threads
-VIEWS_PER_THREAD = 1  # Views per thread
-PROXY_TIMEOUT = 30  # Proxy timeout in seconds
+MAX_THREADS = 10  # Reduced for free proxies
+VIEWS_PER_THREAD = 1
+PROXY_TIMEOUT = 30
 
-# Premium Proxy List (Replace with your proxies)
-PROXY_LIST = [
-    "user:pass@ip:port",  # Premium proxy format 1
-    "ip:port",            # Premium proxy format 2
-    # Add more proxies here (minimum 100 recommended for 100 threads)
-]
+# Free proxy sources (updated automatically)
+def get_free_proxies():
+    try:
+        response = requests.get("https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all")
+        proxies = response.text.split("\r\n")
+        return [p.strip() for p in proxies if p.strip()]
+    except:
+        return [
+            "103.155.217.1:41367",  # Sample free proxies (replace with working ones)
+            "45.43.31.145:3128",
+            "47.88.29.108:8080"
+        ]
+
+PROXY_LIST = get_free_proxies()
+print(f"🛜 Loaded {len(PROXY_LIST)} proxies")
 
 USER_AGENTS = [
-    # Updated user agents list
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
 class ViewCounter:
     def __init__(self):
         self.count = 0
+        self.success = 0
+        self.failed = 0
         self.lock = threading.Lock()
     
-    def increment(self):
+    def increment(self, success=True):
         with self.lock:
             self.count += 1
+            if success:
+                self.success += 1
+            else:
+                self.failed += 1
     
-    def get_count(self):
+    def get_stats(self):
         with self.lock:
-            return self.count
+            return f"Total: {self.count} | ✅ Success: {self.success} | ❌ Failed: {self.failed}"
 
 view_counter = ViewCounter()
 
 def setup_driver():
     options = uc.ChromeOptions()
     
-    # Proxy setup with authentication support
     if PROXY_LIST:
         proxy = random.choice(PROXY_LIST)
-        if "@" in proxy:  # Proxy with authentication
-            username, rest = proxy.split("@")[0], proxy.split("@")1]
-            password, proxy_ip = rest.split(":") if ":" in rest else ("", rest)
-            options.add_argument(f'--proxy-server=http://{proxy_ip}')
-            options.add_argument(f'--proxy-auth={username}:{password}')
-        else:
-            options.add_argument(f'--proxy-server=http://{proxy}')
+        options.add_argument(f'--proxy-server=http://{proxy}')
     
-    # Enhanced stealth options
     options.add_argument('--headless=new')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument('--remote-debugging-port=9222')
     
-    # Random user agent
     user_agent = random.choice(USER_AGENTS)
     options.add_argument(f'user-agent={user_agent}')
     
@@ -66,7 +74,7 @@ def setup_driver():
         driver = uc.Chrome(
             options=options,
             use_subprocess=True,
-            version_main=114  # Specify Chrome version
+            version_main=114
         )
         return driver
     except Exception as e:
@@ -90,33 +98,27 @@ def human_like_actions(driver):
         # Keyboard actions
         actions = ActionChains(driver)
         actions.send_keys(Keys.SPACE).pause(1).send_keys(Keys.ARROW_DOWN).perform()
-        
-        # Mouse movements
-        actions.move_by_offset(random.randint(5, 50), random.randint(5, 50)).perform()
     except:
         pass
 
 def send_view(link, thread_num):
-    global view_counter
     driver = setup_driver()
     if not driver:
+        view_counter.increment(success=False)
         return False
 
     try:
-        # Set timeout
         driver.set_page_load_timeout(PROXY_TIMEOUT)
-        
-        # Open URL
         driver.get(link)
         time.sleep(random.randint(8, 15))
         
-        # Human-like behavior
         human_like_actions(driver)
         
-        # Play video (multiple methods)
+        # Try to play video
         try:
             driver.execute_script("document.querySelector('video').play()")
-            time.sleep(random.randint(15, 30))
+            play_time = random.randint(15, 30)
+            time.sleep(play_time)
         except:
             try:
                 play_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Play']")
@@ -125,11 +127,12 @@ def send_view(link, thread_num):
             except:
                 pass
         
-        view_counter.increment()
-        print(f"✅ [Thread-{thread_num}] View sent! (Total: {view_counter.get_count()})")
+        view_counter.increment(success=True)
+        print(f"✅ [Thread-{thread_num}] View sent! | {view_counter.get_stats()}")
         return True
     except Exception as e:
-        print(f"❌ [Thread-{thread_num}] Error: {str(e)[:100]}...")
+        view_counter.increment(success=False)
+        print(f"❌ [Thread-{thread_num}] Error: {str(e)[:100]}... | {view_counter.get_stats()}")
         return False
     finally:
         try:
@@ -139,40 +142,39 @@ def send_view(link, thread_num):
 
 def main():
     print("""
-    TERABOX MASS VIEW BOT
-    ====================
+    TERABOX VIEW BOT (Free Proxy Version)
+    ====================================
     Features:
-    - Mass proxy support
-    - View counter
+    - Automatic free proxy rotation
+    - Detailed view counter
     - Human-like behavior
     - Multi-threading
     """)
     
     link = input("Terabox Video Link: ").strip()
     total_views = int(input("Total views to send: "))
-    threads = min(int(input("Threads to use (1-100): ")), MAX_THREADS)
+    threads = min(int(input(f"Threads to use (1-{MAX_THREADS}): ")), MAX_THREADS)
     
     views_per_thread = max(1, total_views // threads)
     print(f"\n🔥 Starting {threads} threads ({views_per_thread} views each)...\n")
+    print(f"🔄 Using {len(PROXY_LIST)} proxies\n")
     
     def worker(thread_num):
         for _ in range(views_per_thread):
             send_view(link, thread_num)
             time.sleep(random.randint(10, 30))
     
-    # Start threads
     thread_list = []
     for i in range(threads):
         t = threading.Thread(target=worker, args=(i+1,))
         t.start()
         thread_list.append(t)
-        time.sleep(0.5)  # Stagger thread starts
+        time.sleep(0.5)
     
-    # Wait for completion
     for t in thread_list:
         t.join()
     
-    print(f"\n🎉 Campaign Complete! Total views sent: {view_counter.get_count()}")
+    print(f"\n🎉 Campaign Complete! Final Stats: {view_counter.get_stats()}")
 
 if __name__ == "__main__":
     main()
