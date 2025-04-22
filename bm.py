@@ -2,8 +2,8 @@ import logging
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from io import BytesIO
-from PIL import Image, ImageEnhance, ImageFilter
-import requests
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -12,87 +12,97 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class LightweightGhibliFilter:
+class GhibliConverter:
     @staticmethod
-    def apply_filter(image_bytes: bytes) -> BytesIO:
-        """Apply lightweight Ghibli-style filters to image"""
+    def apply_ghibli_style(image_bytes: bytes) -> BytesIO:
+        """Apply authentic Ghibli-style transformation"""
         try:
-            # Open image
-            img = Image.open(BytesIO(image_bytes))
+            # Open and convert image
+            img = Image.open(BytesIO(image_bytes)).convert('RGB')
             
-            # Convert to RGB if needed
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
+            # Resize maintaining aspect ratio
+            img = ImageOps.fit(img, (512, 512), method=Image.LANCZOS)
             
-            # Resize for consistent processing
-            img = img.resize((512, 512))
+            # Convert to numpy array for processing
+            arr = np.array(img).astype('float32') / 255.0
             
-            # Apply Ghibli-style effects
-            enhancer = ImageEnhance.Color(img)
-            img = enhancer.enhance(1.3)  # Boost colors
+            # Ghibli-style color transformation
+            arr[:,:,0] = arr[:,:,0] * 0.9  # Reduce red
+            arr[:,:,1] = arr[:,:,1] * 1.1  # Boost green
+            arr[:,:,2] = arr[:,:,2] * 1.05  # Slight blue boost
             
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(0.9)  # Soften contrast
+            # Add soft glow effect
+            blur = Image.fromarray((arr * 255).astype('uint8')).filter(
+                ImageFilter.GaussianBlur(radius=2))
+            arr = np.minimum(arr * 1.1, np.array(blur) / 255.0 * 1.2)
             
-            # Add slight blur for painted effect
-            img = img.filter(ImageFilter.GaussianBlur(radius=0.8))
+            # Convert back to PIL Image
+            result = Image.fromarray((arr * 255).astype('uint8'))
+            
+            # Enhance details
+            enhancer = ImageEnhance.Sharpness(result)
+            result = enhancer.enhance(1.3)
             
             # Save to bytes
             output = BytesIO()
-            img.save(output, format='JPEG', quality=90)
+            result.save(output, format='JPEG', quality=95, optimize=True)
             output.seek(0)
             
             return output
             
         except Exception as e:
-            logger.error(f"Filter error: {e}")
+            logger.error(f"Conversion error: {e}")
             raise
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
     await update.message.reply_text(
-        "🎨 Lightweight Ghibli Filter Bot\n\n"
-        "Send me a photo to apply a Ghibli-style filter!\n"
-        "Note: This uses lightweight processing (not AI)"
+        "🎨 Studio Ghibli Style Bot\n\n"
+        "Send me any photo to transform it into authentic Ghibli-style artwork!\n\n"
+        "Tips:\n"
+        "- Use well-lit photos for best results\n"
+        "- Portraits and landscapes work great\n"
+        "- Processing takes just a few seconds"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process incoming photos"""
     try:
         # Send processing message
-        processing_msg = await update.message.reply_text("Applying Ghibli filter...")
+        msg = await update.message.reply_text("🖌️ Painting your Ghibli masterpiece...")
         
-        # Get the photo file
+        # Get highest quality photo
         photo_file = await update.message.photo[-1].get_file()
         image_bytes = await photo_file.download_as_bytearray()
         
-        # Apply filter
-        filtered_image = LightweightGhibliFilter.apply_filter(image_bytes)
+        # Apply transformation
+        result = GhibliConverter.apply_ghibli_style(image_bytes)
         
         # Send result
         await update.message.reply_photo(
-            photo=InputFile(filtered_image, filename="ghibli_style.jpg"),
-            caption="Here's your Ghibli-style image!"
+            photo=InputFile(result, filename="ghibli_art.jpg"),
+            caption="✨ Your Ghibli-style artwork is ready!"
         )
         
-        # Delete processing message
-        await processing_msg.delete()
+        # Clean up
+        await msg.delete()
         
     except Exception as e:
-        logger.error(f"Photo handling error: {e}")
-        await update.message.reply_text("Failed to process image. Please try another photo.")
+        logger.error(f"Error: {e}")
+        await update.message.reply_text(
+            "❌ Couldn't process that image. Please try another photo."
+        )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
     logger.error("Exception:", exc_info=context.error)
     if update.message:
-        await update.message.reply_text("An error occurred. Please try again.")
+        await update.message.reply_text("⚠️ An error occurred. Please try again.")
 
 def main():
     """Start the bot"""
-    application = Application.builder().token("7414054511:AAG7IK7fyQfiApzxnF3rP7ZHJoWi_elWd3I").build()
+    application = Application.builder().token("YOUR_BOT_TOKEN").build()
     
-    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_error_handler(error_handler)
