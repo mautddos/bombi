@@ -26,26 +26,30 @@ class GhibliConverter:
             # Convert to numpy array for processing
             arr = np.array(img).astype('float32') / 255.0
             
-            # Ghibli-style color transformation (more subtle adjustments)
-            arr[:,:,0] = arr[:,:,0] * 0.95  # Slightly reduce red
-            arr[:,:,1] = arr[:,:,1] * 1.15  # Boost green moderately
-            arr[:,:,2] = arr[:,:,2] * 1.10  # Slight blue boost
-            
-            # Enhance contrast and saturation for more vibrant effect
-            arr = np.clip(arr * 1.15, 0, 1)  # Boost overall vibrance
+            # Ghibli-style color transformation (subtle, artistic adjustment)
+            arr[:,:,0] = arr[:,:,0] * 0.9  # Reduce red slightly
+            arr[:,:,1] = arr[:,:,1] * 1.2  # Increase green (for vibrancy)
+            arr[:,:,2] = arr[:,:,2] * 1.05  # Boost blue moderately
 
-            # Add soft glow effect
-            blur = Image.fromarray((arr * 255).astype('uint8')).filter(
-                ImageFilter.GaussianBlur(radius=4))  # Increased blur radius
-            arr = np.minimum(arr * 1.2, np.array(blur) / 255.0 * 1.25)  # Make glow more prominent
+            # Enhance the vibrancy of the image by adjusting saturation and contrast
+            arr = np.clip(arr * 1.1, 0, 1)  # Overall vibrance boost
             
+            # Apply soft light effect using Gaussian Blur
+            blur = Image.fromarray((arr * 255).astype('uint8')).filter(
+                ImageFilter.GaussianBlur(radius=5))  # Increase blur radius for soft glow
+            arr = np.minimum(arr * 1.15, np.array(blur) / 255.0 * 1.2)  # Soft light glow effect
+
             # Convert back to PIL Image
             result = Image.fromarray((arr * 255).astype('uint8'))
             
-            # Enhance sharpness and detail further
+            # Increase sharpness and contrast for more artistic detail
             enhancer = ImageEnhance.Sharpness(result)
-            result = enhancer.enhance(1.5)  # Increased sharpness for more detail
+            result = enhancer.enhance(1.5)  # Increased sharpness for finer details
             
+            # Further enhancement to increase contrast
+            enhancer_contrast = ImageEnhance.Contrast(result)
+            result = enhancer_contrast.enhance(1.3)  # Enhance contrast for a more striking effect
+
             # Save to bytes
             output = BytesIO()
             result.save(output, format='JPEG', quality=95, optimize=True)
