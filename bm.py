@@ -26,22 +26,25 @@ class GhibliConverter:
             # Convert to numpy array for processing
             arr = np.array(img).astype('float32') / 255.0
             
-            # Ghibli-style color transformation
-            arr[:,:,0] = arr[:,:,0] * 0.9  # Reduce red
-            arr[:,:,1] = arr[:,:,1] * 1.1  # Boost green
-            arr[:,:,2] = arr[:,:,2] * 1.05  # Slight blue boost
+            # Ghibli-style color transformation (more subtle adjustments)
+            arr[:,:,0] = arr[:,:,0] * 0.95  # Slightly reduce red
+            arr[:,:,1] = arr[:,:,1] * 1.15  # Boost green moderately
+            arr[:,:,2] = arr[:,:,2] * 1.10  # Slight blue boost
             
+            # Enhance contrast and saturation for more vibrant effect
+            arr = np.clip(arr * 1.15, 0, 1)  # Boost overall vibrance
+
             # Add soft glow effect
             blur = Image.fromarray((arr * 255).astype('uint8')).filter(
-                ImageFilter.GaussianBlur(radius=2))
-            arr = np.minimum(arr * 1.1, np.array(blur) / 255.0 * 1.2)
+                ImageFilter.GaussianBlur(radius=4))  # Increased blur radius
+            arr = np.minimum(arr * 1.2, np.array(blur) / 255.0 * 1.25)  # Make glow more prominent
             
             # Convert back to PIL Image
             result = Image.fromarray((arr * 255).astype('uint8'))
             
-            # Enhance details
+            # Enhance sharpness and detail further
             enhancer = ImageEnhance.Sharpness(result)
-            result = enhancer.enhance(1.3)
+            result = enhancer.enhance(1.5)  # Increased sharpness for more detail
             
             # Save to bytes
             output = BytesIO()
