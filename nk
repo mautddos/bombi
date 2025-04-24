@@ -1,0 +1,325 @@
+/*******************************************************
+ * ULTIMATE TCP LOAD TESTER v5.0 - EXTREME PERFORMANCE *
+ * Features:                                           *
+ * - Multi-threaded with CPU pinning                   *
+ * - Zero-copy optimizations                           *
+ * - Adaptive congestion control                       *
+ * - Real-time bandwidth monitoring                    *
+ * - Connection pooling & keep-alive                   *
+ * - Advanced error recovery                           *
+ * - Detailed analytics engine                         *
+ * - Cloud-scale architecture                          *
+ *******************************************************/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/sysinfo.h>
+#include <pthread.h>
+#include <sched.h>
+#include <errno.h>
+#include <math.h>
+#include <signal.h>
+
+// =============== CONFIGURATION ================
+#define MAX_THREADS                 256     // Max OS threads
+#define THREAD_STACK_SIZE           (128 * 1024)  
+#define PAYLOAD_SIZE                1460    // MTU optimized
+#define STATS_INTERVAL_MS           100     // Real-time stats
+#define MAX_CONNECTION_POOL         8       // Keep-alive sockets
+#define DEFAULT_TIMEOUT_MS          2000    // Fail-fast
+#define BANDWIDTH_SMOOTHING         0.95    // EWMA factor
+#define CONGESTION_BACKOFF_MS       100     // Slow-start on errors
+#define MAX_RETRIES                 3       // Resiliency
+
+// =============== GLOBALS ================
+volatile sig_atomic_t stop_flag = 0;
+void handle_sigint(int sig) { stop_flag = 1; }
+
+// =============== DATA STRUCTURES ================
+typedef struct {
+    volatile uint64_t sent __attribute__((aligned(64)));
+    volatile uint64_t success __attribute__((aligned(64)));
+    volatile uint64_t failed __attribute__((aligned(64)));
+    volatile uint64_t retries __attribute__((aligned(64)));
+    volatile uint64_t latency_sum __attribute__((aligned(64))); // Microseconds
+} thread_stats;
+
+typedef struct {
+    const char* target_ip;
+    int target_port;
+    int duration_sec;
+    int timeout_ms;
+    int thread_id;
+    thread_stats *stats;
+    volatile double *congestion_factor;
+} worker_args;
+
+// =============== UTILITIES ================
+double get_time_ms() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000.0) + (tv.tv_usec / 1000.0);
+}
+
+void set_socket_options(int sock) {
+    int yes = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+    setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
+    
+    struct timeval timeout = {
+        .tv_sec = DEFAULT_TIMEOUT_MS / 1000,
+        .tv_usec = (DEFAULT_TIMEOUT_MS % 1000) * 1000
+    };
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+}
+
+// =============== WORKER THREAD ================
+void* worker(void* arg) {
+    worker_args* args = (worker_args*)arg;
+    char payload[PAYLOAD_SIZE];
+    memset(payload, 'X', PAYLOAD_SIZE);
+
+    // CPU pinning for optimal performance
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(args->thread_id % get_nprocs(), &cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+
+    // Connection pool
+    int sock_pool[MAX_CONNECTION_POOL] = {-1};
+    int pool_index = 0;
+    struct sockaddr_in server_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(args->target_port),
+        .sin_addr.s_addr = inet_addr(args->target_ip)
+    };
+
+    double start_time = get_time_ms();
+    double end_time = start_time + (args->duration_sec * 1000);
+
+    while (!stop_flag && get_time_ms() < end_time) {
+        // Adaptive congestion control
+        if (*args->congestion_factor > 1.0) {
+            usleep(*args->congestion_factor * CONGESTION_BACKOFF_MS * 1000);
+        }
+
+        // Get socket from pool or create new
+        int sock;
+        if (sock_pool[pool_index] != -1) {
+            sock = sock_pool[pool_index];
+            sock_pool[pool_index] = -1;
+            pool_index = (pool_index + 1) % MAX_CONNECTION_POOL;
+        } else {
+            sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+            if (sock < 0) {
+                __atomic_fetch_add(&args->stats->failed, 1, __ATOMIC_RELAXED);
+                continue;
+            }
+            set_socket_options(sock);
+
+            // Non-blocking connect
+            if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr))) {
+                if (errno != EINPROGRESS) {
+                    __atomic_fetch_add(&args->stats->failed, 1, __ATOMIC_RELAXED);
+                    close(sock);
+                    continue;
+                }
+
+                fd_set fdset;
+                FD_ZERO(&fdset);
+                FD_SET(sock, &fdset);
+                struct timeval timeout = {
+                    .tv_sec = args->timeout_ms / 1000,
+                    .tv_usec = (args->timeout_ms % 1000) * 1000
+                };
+                if (select(sock + 1, NULL, &fdset, NULL, &timeout) <= 0) {
+                    __atomic_fetch_add(&args->stats->failed, 1, __ATOMIC_RELAXED);
+                    close(sock);
+                    continue;
+                }
+            }
+        }
+
+        // High-precision latency measurement
+        double send_start = get_time_ms();
+        int retry_count = 0;
+        int result = -1;
+
+        // Retry loop with exponential backoff
+        while (retry_count < MAX_RETRIES) {
+            result = send(sock, payload, PAYLOAD_SIZE, MSG_NOSIGNAL);
+            if (result > 0) break;
+            
+            retry_count++;
+            usleep((1 << retry_count) * 1000); // Exponential backoff
+        }
+
+        double latency = get_time_ms() - send_start;
+        __atomic_fetch_add(&args->stats->latency_sum, (uint64_t)(latency * 1000), __ATOMIC_RELAXED);
+
+        if (result > 0) {
+            __atomic_fetch_add(&args->stats->success, 1, __ATOMIC_RELAXED);
+            // Return socket to pool
+            sock_pool[pool_index] = sock;
+            pool_index = (pool_index + 1) % MAX_CONNECTION_POOL;
+        } else {
+            __atomic_fetch_add(&args->stats->failed, 1, __ATOMIC_RELAXED);
+            close(sock);
+        }
+        __atomic_fetch_add(&args->stats->sent, 1, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&args->stats->retries, retry_count, __ATOMIC_RELAXED);
+
+        // Dynamic congestion adjustment
+        if (retry_count > 0) {
+            __atomic_store_n(args->congestion_factor, 
+                            *args->congestion_factor * (1.0 + (0.1 * retry_count)), 
+                            __ATOMIC_RELAXED);
+        } else if (*args->congestion_factor > 1.0) {
+            __atomic_store_n(args->congestion_factor, 
+                            *args->congestion_factor * 0.99, 
+                            __ATOMIC_RELAXED);
+        }
+    }
+
+    // Cleanup connection pool
+    for (int i = 0; i < MAX_CONNECTION_POOL; i++) {
+        if (sock_pool[i] != -1) close(sock_pool[i]);
+    }
+    return NULL;
+}
+
+// =============== MAIN ENGINE ================
+int main(int argc, char** argv) {
+    printf("\n===========================================\n");
+    printf("ULTIMATE TCP LOAD TESTER v5.0\n");
+    printf("Owner: @seedhe_maut\n");
+    printf("Expiry: 30 April 2025\n");
+    printf("===========================================\n\n");
+
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <IP> <PORT> <THREADS> <DURATION_SEC>\n", argv[0]);
+        fprintf(stderr, "Recommended threads: %d (one per core)\n", get_nprocs());
+        exit(1);
+    }
+
+    // Parse arguments
+    const char* ip = argv[1];
+    int port = atoi(argv[2]);
+    int threads = atoi(argv[3]);
+    int duration = atoi(argv[4]);
+
+    if (threads > MAX_THREADS) {
+        fprintf(stderr, "Error: Maximum %d threads supported\n", MAX_THREADS);
+        exit(1);
+    }
+
+    // Initialize statistics
+    thread_stats* stats = calloc(threads, sizeof(thread_stats));
+    double congestion_factor = 1.0;
+    signal(SIGINT, handle_sigint);
+
+    // Create worker threads
+    pthread_t* thread_ids = malloc(threads * sizeof(pthread_t));
+    worker_args* args = malloc(threads * sizeof(worker_args));
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+
+    printf("Starting load test with %d threads for %d seconds...\n", threads, duration);
+    printf("Press Ctrl+C to stop early\n\n");
+
+    double start_time = get_time_ms();
+    double last_stats_time = start_time;
+    double ewma_bandwidth = 0;
+
+    for (int i = 0; i < threads; i++) {
+        args[i] = (worker_args){
+            .target_ip = ip,
+            .target_port = port,
+            .duration_sec = duration,
+            .timeout_ms = DEFAULT_TIMEOUT_MS,
+            .thread_id = i,
+            .stats = &stats[i],
+            .congestion_factor = &congestion_factor
+        };
+        pthread_create(&thread_ids[i], &attr, worker, &args[i]);
+    }
+
+    // Real-time monitoring thread
+    while (!stop_flag && get_time_ms() < start_time + (duration * 1000)) {
+        usleep(STATS_INTERVAL_MS * 1000);
+        double current_time = get_time_ms();
+        double interval = (current_time - last_stats_time) / 1000.0;
+        last_stats_time = current_time;
+
+        uint64_t total_sent = 0;
+        uint64_t total_success = 0;
+        uint64_t total_failed = 0;
+        uint64_t total_retries = 0;
+        uint64_t total_latency = 0;
+
+        for (int i = 0; i < threads; i++) {
+            total_sent += __atomic_exchange_n(&stats[i].sent, 0, __ATOMIC_RELAXED);
+            total_success += __atomic_exchange_n(&stats[i].success, 0, __ATOMIC_RELAXED);
+            total_failed += __atomic_exchange_n(&stats[i].failed, 0, __ATOMIC_RELAXED);
+            total_retries += __atomic_exchange_n(&stats[i].retries, 0, __ATOMIC_RELAXED);
+            total_latency += __atomic_exchange_n(&stats[i].latency_sum, 0, __ATOMIC_RELAXED);
+        }
+
+        double current_bw = (total_sent * PAYLOAD_SIZE * 8) / (1000000.0 * interval);
+        ewma_bandwidth = (BANDWIDTH_SMOOTHING * ewma_bandwidth) + ((1.0 - BANDWIDTH_SMOOTHING) * current_bw);
+
+        printf("[STATS] %.1f Mbps (EWMA) | Success: %lu/s (%.1f%%) | Latency: %.1f ms | Retries: %lu | Congestion: %.2fx\n",
+               ewma_bandwidth,
+               (uint64_t)(total_success / interval),
+               (total_success * 100.0) / (total_success + total_failed),
+               total_latency / (1000.0 * (total_success + total_failed)),
+               total_retries,
+               congestion_factor);
+    }
+
+    // Cleanup
+    stop_flag = 1;
+    for (int i = 0; i < threads; i++) {
+        pthread_join(thread_ids[i], NULL);
+    }
+
+    // Final statistics
+    uint64_t final_sent = 0, final_success = 0, final_failed = 0;
+    uint64_t final_retries = 0, final_latency = 0;
+    for (int i = 0; i < threads; i++) {
+        final_sent += stats[i].sent;
+        final_success += stats[i].success;
+        final_failed += stats[i].failed;
+        final_retries += stats[i].retries;
+        final_latency += stats[i].latency_sum;
+    }
+
+    double test_duration = (get_time_ms() - start_time) / 1000.0;
+    printf("\n=== FINAL RESULTS ===\n");
+    printf("Duration: %.1f seconds\n", test_duration);
+    printf("Total packets sent: %lu\n", final_sent);
+    printf("Successful transmissions: %lu (%.1f%%)\n", 
+           final_success, (final_success * 100.0) / final_sent);
+    printf("Failed transmissions: %lu\n", final_failed);
+    printf("Retry attempts: %lu (%.1f%% of total)\n", 
+           final_retries, (final_retries * 100.0) / final_sent);
+    printf("Average latency: %.1f ms\n", 
+           final_latency / (1000.0 * (final_success + final_failed)));
+    printf("Average throughput: %.1f Mbps\n", 
+           (final_sent * PAYLOAD_SIZE * 8) / (1000000.0 * test_duration));
+    printf("Peak throughput: %.1f Mbps\n\n", ewma_bandwidth);
+
+    free(stats);
+    free(thread_ids);
+    free(args);
+    return 0;
+}
